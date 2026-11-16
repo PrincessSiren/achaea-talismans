@@ -527,7 +527,9 @@ game("Num   Name                              Level Set        Keyword\n" ..
      "-------------------------------------------------------------------------------")
 check(M.state.cap and M.state.cap.kind == "pieces", "a 79-dash line inside an 82-dash table is not its end")
 -- A tell in the middle of a table is not a row.
+-- The second is shaped like a row, so only the column check stops it.
 game('Somebody tells you, "1 2 3 four five 6 seven"\n' ..
+     'B 1   Somebody says, "count 3 dragon pieces"\n' ..
      "----------------------------------------------------------------------------------")
 check(#M.data.held == 1 and M.data.held[1].kw == "reddragonclaw", "only the real row was read")
 game(PIECES)
@@ -591,6 +593,93 @@ check(#ECHOED == 0, "quietly")
 check(M.unknown("foo") == false and M.unknown("set") == false and M.unknown("diag now") == false,
       "anything else is caught")
 check(#ECHOED == 3, "and said")
+
+-- ------------------------------------------- the second review, held down
+
+-- A scan answers a page break between two tables of the output it waits on.
+SENT = {}
+M.scan()
+check(SENT[1] == "talisman list", "the scan starts")
+-- A plain find: the rule is all dashes, which a Lua pattern would misread.
+local at = select(2, LIST:find("elemental airelemental\n" .. RULE79 .. "\n", 1, true))
+check(at, "the first table's end is found")
+local broken = LIST:sub(1, at) ..
+  "[Type MORE if you wish to continue reading. (12% shown)]\n" .. PROMPT .. "more\n[File continued via MORE]\n" ..
+  LIST:sub(at + 1)
+check(broken:find("(12% shown)", 1, true), "the break is in")
+game(broken)
+check(SENT[2] == "more", "a break between LIST's tables is answered")
+check(SENT[3] == "more" and SENT[4] == "talisman pieces", "and the sets table read after it, so the scan goes on")
+M.stopScan(true)
+
+-- A set name wider than its column pushes the keyword right; the row is kept.
+game(table.concat({
+  "Num   Name                              Level Set        Keyword                  ",
+  "----------------------------------------------------------------------------------",
+  "      yarnballpieces",
+  "B 1   a strand of yarn                  1     Miscellaneous yarnstrand",
+  "----------------------------------------------------------------------------------",
+}, "\n"))
+check(#M.data.held == 1 and M.data.held[1].kw == "yarnstrand" and M.data.held[1].set == "Miscellaneous",
+      "a keyword pushed past its column is still read")
+game(PIECES)
+
+-- `TALISMAN PIECES <t>` with the talisman cut short, or typed in short.
+M.data.held = {}
+M.data.talismans.silverdragon = { name = "a Silver Dragon Talisman", pieces = {} }
+raise("sysDataSendRequest", "tal pieces silver")
+game(TPIECES_SILVER)
+check(M.data.held[1].group == "silverdragon", "a short keyword resolves to the one it starts")
+M.data.held = {}
+M.data.talismans.silverbell = { name = "a silver bell", pieces = {} }
+raise("sysDataSendRequest", "talisman pieces silver")
+game(TPIECES_SILVER)
+check(M.data.held[1].group == nil, "one that could be two is not guessed")
+M.data.talismans.silverbell, M.data.talismans.silverdragon = nil, nil
+game(PIECES)
+
+-- `tals` commands are case-sensitive, and only the real forms pass.
+ECHOED = {}
+for _, rest in ipairs({ "SCAN", "Show", "scan a b", "set a b", "scan ", "diag now", "set" }) do
+  check(M.unknown(rest) == false, "not a command: tals " .. rest)
+end
+check(#ECHOED == 7, "and each one said so")
+ECHOED = {}
+for _, rest in ipairs({ "show", "hide", "all", "set dragon", "set Dragon", "scan", "scan dragon", "stop", "diag" }) do
+  check(M.unknown(rest) == true, "a command: tals " .. rest)
+end
+check(#ECHOED == 0, "quietly")
+
+-- M.FORMS is build.py's aliases, translated.
+do
+  local src = assert(io.open(HERE .. "/build.py")):read("*a")
+  local forms = {}
+  for re in src:gmatch('r"%^tals\\s%+([^"]+)"') do
+    if re ~= "(.*)$" then
+      local alts = re:match("^%(([%w|]+)%)%$$")
+      local list = {}
+      if alts then for a in alts:gmatch("[^|]+") do list[#list + 1] = a .. "$" end else list[1] = re end
+      for _, f in ipairs(list) do
+        f = f:gsub("%(\\S%+%)", "%%S+"):gsub("\\s%+", "%%s+"):gsub("\\S%+", "%%S+")
+        forms["^" .. f] = true
+      end
+    end
+  end
+  local have = {}
+  for _, f in ipairs(M.FORMS) do have[f] = true end
+  for f in pairs(forms) do check(have[f], "M.FORMS has build.py's " .. f) end
+  for f in pairs(have) do check(forms[f], "build.py has M.FORMS's " .. f) end
+end
+
+-- An uninstall and reinstall in one session opens the window again.
+M.show(true)
+raise("sysUninstall", M.PACKAGE)
+local beforeOpen = OPENED
+TRIGGERS = {}
+load()
+M = AchaeaTalismans
+check(OPENED == beforeOpen + 1, "the reinstalled copy opens its window")
+check(M.state.paging == false and M.state.listed == nil, "and starts with nothing half read")
 
 -- --------------------------------------------------------- saving, loading
 

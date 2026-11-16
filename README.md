@@ -55,8 +55,10 @@ closed until you ask for it again (`tals`, `tals show`, `tals set`).
 | `tals stop` | stop a scan |
 | `tals diag` | the build stamp, what is stored, and where it is saved |
 
-Anything else after `tals` is caught and named as not a command, rather than
-going to the game.
+The commands are lower case, as written here; the set name after `tals set`
+or `tals scan` may be any case. Anything else after `tals`, `tals SCAN`
+included, is caught and named as not a command, rather than going to the
+game.
 
 The quickest start is `tals scan`, then `tals set <set>` for the set you are
 working on.
@@ -68,8 +70,9 @@ typed yourself, and it does not answer the pager for them.
 
 A scan sends one command at a time and waits for its answer before sending
 the next. While it waits, it answers `MORE` for a talisman listing of the
-kind it is waiting for, and for nothing else: a help scroll or any other
-output paged meanwhile is left to you. A listing of that kind you type
+kind it is waiting for, including a page break between two of that
+listing's tables, and for nothing else: a help scroll or any other output
+paged meanwhile is left to you. A listing of that kind you type
 yourself mid-scan cannot be told apart from the scan's own, so it may be
 paged on too. A step with no answer in 8 seconds is skipped. `tals stop`
 ends a scan, and nothing more is sent after that.
@@ -83,9 +86,9 @@ PIECES <talisman>` replaces that talisman's rows and leaves the rest alone.
 
 A listing is read only to its end. One left unfinished at a page break is
 dropped, not saved, if anything else is paged before you read on, or if you
-read on more than two minutes later. A row is only taken if its keyword sits
-in the listing's `Keyword` column, so a tell that arrives in the middle of a
-table is not read as a row.
+read on more than five minutes later. A row is only taken if its keyword
+ends the line and starts in the listing's `Keyword` column or after it, so a
+tell that arrives in the middle of a table is not read as a row.
 
 Removing the package stops its trigger and closes its window.
 
@@ -114,8 +117,9 @@ are worth knowing:
   exist in that order.
 - **`TALISMAN PIECES <talisman>` does not say whose pieces it lists.** The
   package takes that from what you already read, or from the command just
-  typed. Failing both, the pieces are shown under "Pieces of no known
-  talisman".
+  typed, where a keyword cut short (`silver`) counts if it starts only one
+  talisman keyword already known. Failing both, the pieces are shown under
+  "Pieces of no known talisman".
 
 ## Building
 
