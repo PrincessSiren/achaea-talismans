@@ -1,0 +1,1176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE MudletPackage>
+<MudletPackage version="1.001">
+    <ScriptPackage>
+        <Script isActive="yes" isFolder="no">
+            <name>AchaeaTalismans</name>
+            <packageName>AchaeaTalismans</packageName>
+            <script>-- Copyright (C) 2026 PrincessSiren
+--
+-- This program is free software: you can redistribute it and/or modify it
+-- under the terms of the GNU General Public License as published by the Free
+-- Software Foundation, either version 3 of the License, or (at your option)
+-- any later version.
+--
+-- This program is distributed in the hope that it will be useful, but WITHOUT
+-- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+-- FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+-- more details. You should have received a copy of the GNU General Public
+-- License along with this program. If not, see &lt;https://www.gnu.org/licenses/&gt;.
+
+--[[
+
+AchaeaTalismans - see how far your talisman pieces get you.
+
+It reads what the game prints for six TALISMAN listings, keeps it, and draws
+a window from it:
+
+  TALISMAN PIECES          what you hold, grouped by talisman
+  TALISMAN PIECES &lt;t&gt;      the same for one talisman
+  TALISMAN INFO &lt;t&gt;        what a talisman is built from
+  TALISMAN SET &lt;set&gt;       which talismans a set holds
+  TALISMAN SETS            every set, and how many of each you have done
+  TALISMAN LIST            the same sets, plus the talismans you have done
+
+Nothing has to be typed differently: the package reads those whenever they
+are typed, by you or by `tals scan`. Reading is all it does unless asked to
+scan, and a scan sends only TALISMAN commands, plus MORE while the listing it
+is waiting for is paged.
+
+The arithmetic is HELP TALISMANS (19.24): "Two Pieces of the same level may be
+combined into a Piece of one level higher", and split back down. So a piece at
+level n is worth 2^(n-1) level-1 pieces, and a slot that asks for level 7
+wants 64 of those. Every piece you hold of a slot's keyword counts toward it,
+whatever its level, because a higher one can be split down and lower ones
+combined up. A slot is ready when the sum reaches what it asks for; the
+COMBINE and SPLIT commands that get it there are still yours to type.
+
+  tals                 show the window, and what has been read so far
+  tals show|hide       the window
+  tals all             the window lists every talisman you hold pieces of
+  tals set &lt;set&gt;       the window lists one set's talismans
+  tals scan            TALISMAN LIST and PIECES, then INFO for each talisman
+                       you hold pieces of and have not read yet
+  tals scan &lt;set&gt;      TALISMAN SET &lt;set&gt;, then INFO for each of its talismans
+  tals stop            stop a scan
+  tals diag            build stamp, what is stored, where
+
+]]
+
+AchaeaTalismans = AchaeaTalismans or {}
+local M = AchaeaTalismans
+
+M.VERSION = "0.1.0"
+M.BUILD = M.BUILD or "source"   -- build.py replaces this
+
+-- The name Mudlet knows the package by, which is what its uninstall event
+-- carries. build.py has the same string; the harness holds the two together.
+M.PACKAGE = "AchaeaTalismans"
+M.WINDOW = "AchaeaTalismans"
+
+-- ------------------------------------------------------------------- the data
+
+-- Everything saved, and the type each key must have to come back from a
+-- file. A key not listed here is neither saved nor loaded, so the two cannot
+-- disagree.
+local DATA_KEYS = {
+  sets      = "table",    -- keyword -&gt; { name, done, total, talismans }
+  setOrder  = "table",    -- set keywords, in the game's order
+  talismans = "table",    -- keyword -&gt; { name, brief, set, pieces }
+  held      = "table",    -- the last TALISMAN PIECES, one row per line
+  heldAt    = "number",   -- when that was read, os.time(); 0 for never
+  completed = "table",    -- talisman keyword -&gt; { name, set }
+  focus     = "string",   -- the set the window shows, or "" for all held
+  shown     = "boolean",  -- whether the window is open
+}
+
+local function fresh()
+  return {
+    sets = {}, setOrder = {}, talismans = {}, held = {}, heldAt = 0,
+    completed = {}, focus = "", shown = true,
+  }
+end
+
+M.data = M.data or fresh()
+
+-- On the module table rather than in a file-local: Mudlet keeps temp triggers
+-- and timers across a script recompile, and a fresh local would lose the ids
+-- of the old ones and install a second set.
+M.state = M.state or {
+  triggers = {},
+  handlers = {},
+  cap      = nil,   -- the output being read, if any
+  scan     = nil,   -- the scan in progress, if any
+  loaded   = "none",
+  read     = 0,     -- outputs read since the package started
+}
+local S = M.state
+
+local function log(message, colour)
+  -- A leading newline, because this is often called from a trigger, and
+  -- echo inside a trigger is glued onto the end of the line that fired it.
+  cecho("\n&lt;" .. (colour or "gold") .. "&gt;[talismans]&lt;reset&gt; " .. message .. "\n")
+end
+
+function M.now()
+  if type(getEpoch) == "function" then
+    local ok, t = pcall(getEpoch)
+    if ok and type(t) == "number" then return t end
+  end
+  return os.time()
+end
+
+-- ---------------------------------------------------------- saving, loading
+
+function M.path()
+  return getMudletHomeDir() .. "/achaea-talismans.lua"
+end
+
+function M.load()
+  local path = M.path()
+  if not (io.exists and io.exists(path)) then
+    S.loaded = "none"
+    return false
+  end
+  local stored = {}
+  if not pcall(table.load, path, stored) then
+    -- table.load runs the file as Lua, so a half-written one raises. Say so,
+    -- and let M.save move it aside rather than write over it.
+    S.loaded = "unreadable"
+    log("could not read " .. path .. "; starting empty", "red")
+    return false
+  end
+  local data = fresh()
+  for key, kind in pairs(DATA_KEYS) do
+    if type(stored[key]) == kind then data[key] = stored[key] end
+  end
+  M.data = data
+  S.loaded = "ok"
+  return true
+end
+
+function M.save()
+  local path = M.path()
+  if S.loaded == "unreadable" then
+    -- os.rename reports failure by returning nil, not by raising. If the file
+    -- could not be moved aside, writing now would destroy the only copy.
+    local ok, moved = pcall(os.rename, path, path .. ".bad")
+    if not (ok and moved) then
+      log("could not move " .. path .. " aside; nothing saved", "red")
+      return false
+    end
+    S.loaded = "ok"
+  end
+  local out = {}
+  for key in pairs(DATA_KEYS) do out[key] = M.data[key] end
+  -- table.save reports a file it could not open by returning nil and a
+  -- message, not by raising. So the message is the sign of a failure, and
+  -- pcall's own result is not one.
+  local ok, _, failed = pcall(table.save, path, out)
+  if not ok or failed ~= nil then
+    log("could not write " .. path .. "; what was read lasts until Mudlet closes",
+        "red")
+    return false
+  end
+  return true
+end
+
+-- ------------------------------------------------------- reading the output
+
+-- Every pattern below is written against a capture of the game's own output,
+-- typed on 2026-11-16 except where it says otherwise, and applied to a line
+-- with its trailing spaces removed: the game pads its header lines.
+
+M.HEADERS = {
+  -- TALISMAN PIECES. No indent before Num.
+  pieces  = "^Num%s+Name%s+Level%s+Set%s+Keyword$",
+  -- TALISMAN PIECES &lt;talisman&gt;. The same columns, indented.
+  tpieces = "^%s+Num%s+Name%s+Level%s+Set%s+Keyword$",
+  -- The talisman tables in TALISMAN LIST.
+  tlist   = "^Name%s+Set%s+Keyword$",
+  -- TALISMAN SETS, and the sets table in TALISMAN LIST.
+  sets    = "^Name%s+Status%s+Keyword$",
+}
+-- TALISMAN SET and TALISMAN INFO both open with this; the line after it says
+-- which one it is.
+M.NAME_LINE = "^Name: (.+)$"
+-- The tables open and close with a rule of dashes, 79 or 82 long. Twenty is
+-- enough to tell it from the underlines of a help scroll's headings.
+M.RULE = "^%-%-%-%-%-%-%-%-%-%-%-%-%-%-%-%-%-%-%-%-+$"
+-- The pager. Everything from the first line to the second is the client
+-- paging, and whatever arrived meanwhile is not part of the table.
+M.MORE_OPEN = "^%[Type MORE if you wish to continue reading"
+M.MORE_CLOSE = "^%[File continued via MORE%]"
+-- A paged table nobody went on reading is let go after this long, so that a
+-- later MORE for something else does not feed that something to it.
+M.PAUSE_MAX = 120
+
+-- B 1   a Black Dragon's heart            1     Dragon     blackdragonheart
+-- The name column is cut at 33 characters, so the name is taken as whatever
+-- comes before the last three columns rather than by width.
+M.ROW_PIECES = "^(%u) (%d+)%s+(.-)%s+(%d+)%s+(%S+)%s+(%S+)$"
+--       blackdragonpieces
+M.ROW_GROUP = "^%s%s%s%s%s%s(%S+)$"
+--   B (1) a Silver Dragon's claw           2     dragon    silverdragonclaw
+M.ROW_TPIECES = "^%s+(%u) %((%d+)%) (.-)%s+(%d+)%s+(%S+)%s+(%S+)$"
+-- a miniature Air Elemental                     elemental airelemental
+M.ROW_TLIST = "^(.-)%s+(%S+)%s+(%S+)$"
+-- Dragon                                        0/6       dragon
+M.ROW_SETS = "^(.-)%s+(%d+)/(%d+)%s+(%S+)$"
+-- a Black Dragon Talisman (blackdragon)
+M.ROW_SET = "^(.-) %((%S+)%)$"
+-- (1) a Red Dragon's claw (reddragonclaw), level 7
+-- A long one wraps, with the rest on the next line indented two spaces
+-- (INFO harness, 2026-10-15), so rows are joined before this is applied.
+M.ROW_INFO = "^%((%d+)%) (.-) %((%S+)%), level (%d+)$"
+
+local function rtrim(s) return (s:gsub("%s+$", "")) end
+local function trim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
+
+local function headerKind(l)
+  for kind, pattern in pairs(M.HEADERS) do
+    if l:find(pattern) then return kind end
+  end
+  if l:find(M.NAME_LINE) then return "name" end
+  return nil
+end
+
+-- Each reader takes a capture and a line and answers with one of:
+--   nil     the line was taken, keep reading
+--   "done"  the line was taken and the output is over
+--   "pass"  the output ended before this line, which is someone else's
+--   "drop"  this was not the output it looked like
+local READ = {}
+
+--- Whether a row's last field starts in its header's Keyword column and ends
+--- the line. In every row of every table captured it does, and a tell or any
+--- other line that arrives mid-table almost never will, so a row is only
+--- taken if it does.
+local function inColumn(cap, l, kw)
+  local col = cap.kwCol
+  return col ~= nil and kw ~= nil
+    and l:sub(col - 1, col - 1) == " "
+    and l:sub(col) == kw
+end
+
+local function tableReader(onRow)
+  return function(cap, l)
+    if l:find(M.RULE) then
+      if cap.rules == 0 then
+        cap.rules, cap.ruleLen = 1, #l
+        return nil
+      end
+      -- The closing rule is as long as the opening one; any other run of
+      -- dashes is something else's.
+      if #l == cap.ruleLen then return "done" end
+      return nil
+    end
+    -- Before the opening rule nothing else is expected.
+    if cap.rules == 0 then return "drop" end
+    onRow(cap, l)
+    return nil
+  end
+end
+
+READ.pieces = tableReader(function(cap, l)
+  local src, n, name, level, set, kw = l:match(M.ROW_PIECES)
+  if src and inColumn(cap, l, kw) then
+    cap.rows[#cap.rows + 1] = {
+      source = src, count = tonumber(n), name = trim(name),
+      level = tonumber(level), set = set, kw = kw, group = cap.group,
+    }
+    return
+  end
+  local heading = l:match(M.ROW_GROUP)
+  if heading then
+    -- The heading is the talisman's keyword with "pieces" on the end, as far
+    -- as the six dragons show; the others are read the same way.
+    cap.group = heading:gsub("pieces$", "")
+  end
+end)
+
+READ.tpieces = tableReader(function(cap, l)
+  local src, n, name, level, set, kw = l:match(M.ROW_TPIECES)
+  if src and inColumn(cap, l, kw) then
+    cap.rows[#cap.rows + 1] = {
+      source = src, count = tonumber(n), name = trim(name),
+      level = tonumber(level), set = set, kw = kw,
+    }
+  end
+end)
+
+READ.tlist = tableReader(function(cap, l)
+  local name, set, kw = l:match(M.ROW_TLIST)
+  if name and name ~= "" and inColumn(cap, l, kw) then
+    cap.rows[#cap.rows + 1] = { name = trim(name), set = set, kw = kw }
+  end
+end)
+
+READ.sets = tableReader(function(cap, l)
+  local name, done, total, kw = l:match(M.ROW_SETS)
+  if name and inColumn(cap, l, kw) then
+    cap.rows[#cap.rows + 1] = {
+      name = trim(name), done = tonumber(done), total = tonumber(total), kw = kw,
+    }
+  end
+end)
+
+-- The line after "Name:" decides between a set and a talisman.
+READ.name = function(cap, l)
+  local partial = l:match("^Partial name: (%S+)$")
+  if partial then
+    cap.kind, cap.kw, cap.rows = "set", partial, {}
+    return nil
+  end
+  local kw = l:match("^Keyword: (%S+)$")
+  if kw then
+    cap.kind, cap.kw, cap.pieces = "info", kw, {}
+    return nil
+  end
+  return "drop"
+end
+
+READ.set = function(cap, l)
+  if cap.listing then
+    local name, kw = l:match(M.ROW_SET)
+    if name then
+      cap.rows[#cap.rows + 1] = { name = name, kw = kw }
+      return nil
+    end
+    return "pass"
+  end
+  if l == "Talismans:" then cap.listing = true; return nil end
+  local desc = l:match("^Description: (.*)$")
+  if desc then cap.description = desc; return nil end
+  if l:find("^  ") and cap.description then
+    cap.description = cap.description .. " " .. trim(l)
+    return nil
+  end
+  return "pass"
+end
+
+local function flushPiece(cap)
+  if not cap.pending then return end
+  local n, name, kw, level = cap.pending:match(M.ROW_INFO)
+  if n then
+    cap.pieces[#cap.pieces + 1] = {
+      count = tonumber(n), name = name, kw = kw, level = tonumber(level),
+    }
+  else
+    cap.unread = (cap.unread or 0) + 1
+  end
+  cap.pending = nil
+end
+
+READ.info = function(cap, l)
+  local set = l:match("^Set: (.*)$")
+  if set then
+    flushPiece(cap)
+    cap.set = trim(set)
+    return "done"
+  end
+  if l == "Pieces:" then cap.listing = true; return nil end
+  local brief = l:match("^Brief: (.*)$")
+  if brief then cap.brief = brief; return nil end
+  if l:find("^  ") then
+    if cap.pending then
+      cap.pending = cap.pending .. " " .. trim(l)
+    elseif cap.brief and not cap.listing then
+      cap.brief = cap.brief .. " " .. trim(l)
+    end
+    return nil
+  end
+  if cap.listing and l:find("^%(%d+%) ") then
+    flushPiece(cap)
+    cap.pending = l
+    return nil
+  end
+  flushPiece(cap)
+  return "pass"
+end
+
+-- -------------------------------------------------- folding what was read in
+
+--- The set keyword for a set as some listing names it: TALISMAN PIECES says
+--- "Dragon", TALISMAN PIECES &lt;t&gt; says "dragon", TALISMAN INFO says "Dragon",
+--- and Miscellaneous's keyword is "misc".
+function M.setKey(name)
+  if not name then return nil end
+  local low = name:lower()
+  if M.data.sets[low] then return low end
+  for kw, set in pairs(M.data.sets) do
+    if (set.name or ""):lower() == low then return kw end
+  end
+  return low
+end
+
+--- Which talisman a piece keyword belongs to: TALISMAN INFO says for certain,
+--- and failing that the heading it was last listed under.
+function M.ownerOf(pieceKw)
+  for tkw, t in pairs(M.data.talismans) do
+    for _, p in ipairs(t.pieces or {}) do
+      if p.kw == pieceKw then return tkw end
+    end
+  end
+  for _, row in ipairs(M.data.held) do
+    if row.kw == pieceKw and row.group then return row.group end
+  end
+  return nil
+end
+
+local COMMIT = {}
+
+COMMIT.pieces = function(cap)
+  M.data.held = cap.rows
+  M.data.heldAt = os.time()
+end
+
+-- One talisman's pieces replace what was held for that talisman, and only
+-- that. Which talisman is worked out from the rows, since the output does
+-- not name it.
+COMMIT.tpieces = function(cap)
+  local owner, mixed = nil, false
+  for _, row in ipairs(cap.rows) do
+    local o = M.ownerOf(row.kw)
+    if o == nil or (owner and o ~= owner) then mixed = true end
+    owner = owner or o
+    row.group = o
+  end
+  -- Nothing read so far says whose pieces these are, but the command that
+  -- was typed for them does.
+  local asked = S.asked
+  if (owner == nil or mixed) and asked and M.now() - asked.at &lt; M.ASKED_FOR then
+    owner, mixed = asked.kw, false
+    for _, row in ipairs(cap.rows) do row.group = row.group or owner end
+  end
+  M.data.heldAt = os.time()
+  local gone = {}
+  if owner and not mixed then
+    for _, row in ipairs(M.data.held) do
+      if row.group == owner then gone[row] = true end
+    end
+  else
+    local kws = {}
+    for _, row in ipairs(cap.rows) do kws[row.kw] = true end
+    for _, row in ipairs(M.data.held) do
+      if kws[row.kw] then gone[row] = true end
+    end
+  end
+  local held, placed = {}, false
+  for _, row in ipairs(M.data.held) do
+    if gone[row] then
+      if not placed then
+        for _, new in ipairs(cap.rows) do held[#held + 1] = new end
+        placed = true
+      end
+    else
+      held[#held + 1] = row
+    end
+  end
+  if not placed then
+    for _, new in ipairs(cap.rows) do held[#held + 1] = new end
+  end
+  M.data.held = held
+end
+
+-- HELP TALISMANS says TALISMAN LIST shows the completed talismans and the
+-- completed ones you carry, and in the one LIST captured both come straight
+-- before the sets table, untitled, with the incomplete ones after it. So a
+-- talisman table counts as done only when a sets table follows it within a
+-- few lines (S.listed, below); one that comes after, or on its own, does
+-- not, because nothing says what it lists. Done is added to, never cleared.
+COMMIT.tlist = function(cap)
+  S.listed = S.listed or {}
+  for _, row in ipairs(cap.rows) do S.listed[#S.listed + 1] = row end
+end
+
+COMMIT.sets = function(cap)
+  for _, row in ipairs(cap.done or {}) do
+    M.data.completed[row.kw] = { name = row.name, set = row.set }
+  end
+  local order = {}
+  for _, row in ipairs(cap.rows) do
+    local set = M.data.sets[row.kw]
+    if not set then
+      -- A set read by TALISMAN SET before SETS was ever read went in under
+      -- the keyword SET printed, which may not be this one: take it over.
+      for kw, other in pairs(M.data.sets) do
+        if kw ~= row.kw and (other.name or ""):lower() == row.name:lower() then
+          set = other
+          M.data.sets[kw] = nil
+          break
+        end
+      end
+    end
+    set = set or {}
+    set.name, set.done, set.total = row.name, row.done, row.total
+    M.data.sets[row.kw] = set
+    order[#order + 1] = row.kw
+  end
+  M.data.setOrder = order
+end
+
+COMMIT.set = function(cap)
+  local key = M.data.sets[cap.kw] and cap.kw or nil
+  if not key then
+    for kw, set in pairs(M.data.sets) do
+      if (set.name or ""):lower() == cap.name:lower() then key = kw; break end
+    end
+  end
+  key = key or cap.kw
+  cap.key = key
+  local set = M.data.sets[key] or {}
+  set.name = cap.name
+  set.talismans = cap.rows
+  set.description = cap.description
+  M.data.sets[key] = set
+  for _, kw in ipairs(M.data.setOrder) do
+    if kw == key then return end
+  end
+  M.data.setOrder[#M.data.setOrder + 1] = key
+end
+
+COMMIT.info = function(cap)
+  M.data.talismans[cap.kw] = {
+    name = cap.name, brief = cap.brief, set = cap.set, pieces = cap.pieces,
+  }
+end
+
+function M.commit(cap)
+  if not COMMIT[cap.kind] then return false end
+  COMMIT[cap.kind](cap)
+  S.read = S.read + 1
+  M.save()
+  M.scanHeard(cap)
+  M.redraw()
+  return true
+end
+
+--- Whether the scan is waiting for a listing that opens this way.
+local function scanWants(kind)
+  local step = S.scan and S.scan.step
+  if not step then return false end
+  if kind == "name" then return step.kind == "set" or step.kind == "info" end
+  return step.kind == kind or (step.kinds and step.kinds[kind]) or false
+end
+
+local function open(l)
+  local kind = headerKind(l)
+  if not kind then return end
+  if kind == "name" then
+    S.cap = { kind = "name", name = l:match(M.NAME_LINE) }
+  else
+    S.cap = { kind = kind, rules = 0, rows = {}, kwCol = l:find("Keyword", 1, true) }
+  end
+  S.cap.fromScan = scanWants(kind)
+  -- Talisman tables count as done only if a sets table follows them with
+  -- nothing but blank lines between (M.feed lets them go otherwise).
+  if kind == "sets" then
+    S.cap.done, S.listed = S.listed, nil
+  elseif kind ~= "tlist" then
+    S.listed = nil
+  end
+end
+
+--- One line of game output. Everything the package knows comes through here.
+function M.feed(text)
+  local l = rtrim(text or "")
+  local cap = S.cap
+  if l:find(M.MORE_OPEN) then
+    S.paging = true
+    if cap and cap.paused then
+      -- A second page break before the first was read on: the pager is
+      -- showing something else now, and this listing was left unfinished.
+      S.cap = nil
+    elseif cap then
+      cap.paused, cap.pausedAt = true, M.now()
+      -- Answered only for a listing the scan asked for and is waiting on.
+      if cap.fromScan and S.scan then send("more", false) end
+    end
+    return
+  end
+  if l:find(M.MORE_CLOSE) then
+    S.paging = false
+    if cap and cap.paused then
+      if M.now() - (cap.pausedAt or 0) &gt; M.PAUSE_MAX then
+        S.cap = nil
+      else
+        cap.paused = false
+      end
+    end
+    return
+  end
+  -- What the pager let in between pages is not part of any output. A new
+  -- listing's header means the pager was left, so it ends that, and drops a
+  -- listing that was waiting on a page.
+  if S.paging then
+    if not headerKind(l) then return end
+    S.paging = false
+    if cap and cap.paused then S.cap, cap = nil, nil end
+  end
+  -- In LIST the sets table follows the done talismans after one blank line.
+  -- Any other line between, a prompt above all, means they were not one
+  -- listing.
+  if S.listed and not cap and l ~= "" and not headerKind(l) then S.listed = nil end
+  -- A new listing starting means a table or a paged output was never
+  -- finished, and it is let go. An unpaged SET or INFO is left to its reader,
+  -- which ends it on any line it does not know.
+  if cap and (cap.rules or cap.paused) and headerKind(l) then
+    S.cap, cap = nil, nil
+  end
+  if cap and cap.paused then return end
+  if cap then
+    local verdict = READ[cap.kind](cap, l)
+    if verdict == nil then return end
+    S.cap = nil
+    if verdict == "done" then M.commit(cap); return end
+    if verdict == "pass" then M.commit(cap) end
+    -- "pass" and "drop" both leave this line to be looked at afresh.
+  end
+  open(l)
+end
+
+-- ------------------------------------------------------------- the arithmetic
+
+--- A piece at this level, in level-1 pieces.
+function M.units(level)
+  return 2 ^ ((tonumber(level) or 1) - 1)
+end
+
+--- Every held piece of this keyword, in level-1 pieces.
+function M.heldUnits(pieceKw)
+  local n = 0
+  for _, row in ipairs(M.data.held) do
+    if row.kw == pieceKw then n = n + row.count * M.units(row.level) end
+  end
+  return n
+end
+
+local function label(tkw, pieceKw)
+  if pieceKw:sub(1, #tkw) == tkw and #pieceKw &gt; #tkw then
+    return pieceKw:sub(#tkw + 1)
+  end
+  return pieceKw
+end
+
+--- How far the pieces held get one talisman, from its TALISMAN INFO.
+function M.progress(tkw)
+  local t = M.data.talismans[tkw]
+  if not t then return nil end
+  local slots, ready, have, need = {}, 0, 0, 0
+  for _, p in ipairs(t.pieces or {}) do
+    local want = p.count * M.units(p.level)
+    local got = M.heldUnits(p.kw)
+    local counted = math.min(got, want)
+    slots[#slots + 1] = {
+      kw = p.kw, label = label(tkw, p.kw), level = p.level, count = p.count,
+      have = got, need = want,
+    }
+    if got &gt;= want then ready = ready + 1 end
+    have, need = have + counted, need + want
+  end
+  return { slots = slots, ready = ready, have = have, need = need }
+end
+
+--- "done", "started" or "none".
+function M.status(tkw)
+  if M.data.completed[tkw] then return "done" end
+  local t = M.data.talismans[tkw]
+  for _, row in ipairs(M.data.held) do
+    if row.group == tkw then return "started" end
+    if t then
+      for _, p in ipairs(t.pieces or {}) do
+        if p.kw == row.kw then return "started" end
+      end
+    end
+  end
+  return "none"
+end
+
+--- Talisman keywords you hold pieces of, in the order TALISMAN PIECES listed
+--- them.
+function M.heldTalismans()
+  local out, seen = {}, {}
+  for _, row in ipairs(M.data.held) do
+    local tkw = row.group or M.ownerOf(row.kw)
+    if tkw and not seen[tkw] then
+      seen[tkw] = true
+      out[#out + 1] = tkw
+    end
+  end
+  return out
+end
+
+-- -------------------------------------------------------------- the drawing
+
+M.BAR = 16
+local MARK = { done = "&lt;green&gt;●", started = "&lt;yellow&gt;◐", none = "&lt;dim_grey&gt;○" }
+
+local function bar(have, need)
+  local fill = need &gt; 0 and math.floor(M.BAR * math.min(have, need) / need) or 0
+  if have &gt; 0 and fill == 0 then fill = 1 end
+  local colour = have &gt;= need and "&lt;green&gt;" or (have &gt; 0 and "&lt;yellow&gt;" or "&lt;dim_grey&gt;")
+  return colour .. string.rep("█", fill) .. "&lt;dim_grey&gt;" .. string.rep("░", M.BAR - fill)
+end
+
+local function pad(s, n)
+  if #s &gt;= n then return s:sub(1, n) end
+  return s .. string.rep(" ", n - #s)
+end
+
+local function fmt(n) return string.format("%d", n) end
+
+-- A link's code is a string of Lua that Mudlet compiles when it is clicked,
+-- and the keywords in it come from the game or from what was typed, so each
+-- goes in as a quoted literal rather than pasted between quote marks.
+local function q(s) return string.format("%q", s) end
+
+--- What the window shows, as a list of pieces: a string is coloured text,
+--- a table is { text, code, hint } and becomes a link that runs the code.
+function M.render()
+  local out = {}
+  local function add(s) out[#out + 1] = s end
+  local function link(text, code, hint) out[#out + 1] = { text, code, hint } end
+  local d = M.data
+
+  add("&lt;white&gt;Talisman pieces&lt;reset&gt;")
+  if d.heldAt &gt; 0 then
+    add("&lt;dim_grey&gt;  read " .. os.date("%Y-%m-%d %H:%M", d.heldAt) .. "  ")
+  else
+    add("&lt;dim_grey&gt;  pieces not read yet  ")
+  end
+  link("&lt;cyan&gt;[scan]", "AchaeaTalismans.scan()", "send TALISMAN SETS, PIECES, and INFO for what you hold")
+  add(" ")
+  link("&lt;cyan&gt;[all]", "AchaeaTalismans.setFocus('')", "every talisman you hold pieces of")
+  add("\n\n")
+
+  local list
+  if d.focus ~= "" then
+    local set = d.sets[d.focus]
+    local name = set and set.name or d.focus
+    add("&lt;white&gt;" .. name .. "&lt;reset&gt;")
+    if set and set.total then add("  " .. fmt(set.done) .. "/" .. fmt(set.total) .. " done") end
+    add("  ")
+    link("&lt;cyan&gt;[scan set]", "AchaeaTalismans.scan(" .. q(d.focus) .. ")", "send TALISMAN SET and INFO for each of its talismans")
+    add("\n")
+    list = {}
+    if set and set.talismans then
+      for _, t in ipairs(set.talismans) do list[#list + 1] = t.kw end
+    else
+      for tkw, t in pairs(d.talismans) do
+        if M.setKey(t.set) == d.focus then list[#list + 1] = tkw end
+      end
+      table.sort(list)
+      if #list == 0 then add("&lt;dim_grey&gt;  its talismans are not read yet\n") end
+    end
+  else
+    list = M.heldTalismans()
+    if #list == 0 then add("&lt;dim_grey&gt;No pieces read yet. TALISMAN PIECES, or [scan].\n") end
+  end
+
+  for _, tkw in ipairs(list) do
+    local t = d.talismans[tkw]
+    local status = M.status(tkw)
+    add("\n" .. MARK[status] .. " &lt;white&gt;" .. (t and t.name or tkw) .. "&lt;reset&gt; &lt;dim_grey&gt;(" .. tkw .. ")")
+    local p = M.progress(tkw)
+    if status == "done" then
+      add("  &lt;green&gt;done\n")
+    elseif p then
+      local pct = p.need &gt; 0 and math.floor(100 * p.have / p.need) or 0
+      add("  &lt;reset&gt;" .. fmt(p.ready) .. "/" .. fmt(#p.slots) .. " ready, " .. fmt(pct) .. "%\n")
+      for _, s in ipairs(p.slots) do
+        local count = s.count &gt; 1 and (fmt(s.count) .. "x") or ""
+        add("  &lt;reset&gt;" .. pad(s.label, 16) .. " &lt;dim_grey&gt;" .. pad(count .. "L" .. fmt(s.level), 5) .. " ")
+        add(bar(s.have, s.need) .. " &lt;reset&gt;" .. fmt(s.have) .. "/" .. fmt(s.need) .. "\n")
+      end
+    else
+      add("  &lt;dim_grey&gt;needs not read ")
+      link("&lt;cyan&gt;[info]", "send(" .. q("talisman info " .. tkw) .. ", false)", "TALISMAN INFO " .. tkw)
+      add("\n")
+      for _, row in ipairs(d.held) do
+        if row.group == tkw then
+          add("  &lt;reset&gt;" .. pad(label(tkw, row.kw), 16) .. " &lt;dim_grey&gt;" .. fmt(row.count) .. " at L" .. fmt(row.level) ..
+              " = " .. fmt(row.count * M.units(row.level)) .. "\n")
+        end
+      end
+    end
+  end
+
+  local loose = {}
+  for _, row in ipairs(d.held) do
+    if not (row.group or M.ownerOf(row.kw)) then loose[#loose + 1] = row end
+  end
+  if d.focus == "" and #loose &gt; 0 then
+    add("\n&lt;white&gt;Pieces of no known talisman&lt;reset&gt;\n")
+    for _, row in ipairs(loose) do
+      add("  &lt;reset&gt;" .. pad(row.kw, 24) .. " &lt;dim_grey&gt;" .. fmt(row.count) .. " at L" .. fmt(row.level) ..
+          " = " .. fmt(row.count * M.units(row.level)) .. "\n")
+    end
+  end
+
+  if #d.setOrder &gt; 0 then
+    add("\n&lt;white&gt;Sets&lt;reset&gt;  &lt;dim_grey&gt;click one to list its talismans\n")
+    for _, kw in ipairs(d.setOrder) do
+      local set = d.sets[kw]
+      link("&lt;reset&gt;" .. pad(set.name or kw, 14), "AchaeaTalismans.setFocus(" .. q(kw) .. ")", "list the " .. (set.name or kw) .. " set")
+      -- A set read by TALISMAN SET alone has no counts yet.
+      local counts = set.total and (fmt(set.done or 0) .. "/" .. fmt(set.total)) or "?"
+      local line = " &lt;dim_grey&gt;" .. pad(counts, 6)
+      if set.talismans then
+        for _, t in ipairs(set.talismans) do line = line .. MARK[M.status(t.kw)] end
+      end
+      add(line .. "\n")
+    end
+  else
+    add("\n&lt;dim_grey&gt;Sets not read yet. TALISMAN SETS, or [scan].\n")
+  end
+  return out
+end
+
+--- Draw the pieces M.render made into a window, or the main console for nil.
+function M.draw(win)
+  for _, piece in ipairs(M.render()) do
+    if type(piece) == "table" then
+      if win then cechoLink(win, piece[1], piece[2], piece[3], true)
+      else cechoLink(piece[1], piece[2], piece[3], true) end
+    else
+      if win then cecho(win, piece) else cecho(piece) end
+    end
+  end
+end
+
+--- Open the window, or show it again if it was closed.
+function M.open()
+  openUserWindow(M.WINDOW, true, true, "right")
+  pcall(setUserWindowTitle, M.WINDOW, "Talismans")
+  S.opened = true
+end
+
+--- Draw what is known into the window. It is opened only the first time,
+--- since openUserWindow on an existing window shows it, and a window closed
+--- with its own X should stay closed until asked for again; drawing into a
+--- closed one is harmless and keeps it current for then.
+function M.redraw()
+  if not M.data.shown then return false end
+  if not S.opened then M.open() end
+  clearWindow(M.WINDOW)
+  M.draw(M.WINDOW)
+  return true
+end
+
+-- ------------------------------------------------------------------- scanning
+
+-- A scan sends one command, waits for its output to be read, and only then
+-- sends the next, so two outputs never arrive tangled and the game is never
+-- flooded. One that has not answered in this long is given up on.
+M.SCAN_WAIT = 8
+
+local function scanSend()
+  local scan = S.scan
+  local step = table.remove(scan.queue, 1)
+  if not step then
+    S.scan = nil
+    log("scan done: " .. scan.heard .. " read" ..
+        (scan.missed &gt; 0 and (", " .. scan.missed .. " not answered") or ""))
+    return
+  end
+  scan.step = step
+  send(step.cmd, false)
+  scan.timer = tempTimer(M.SCAN_WAIT, function() M.scanTimeout() end)
+end
+
+local function infoFor(list)
+  local steps = {}
+  for _, tkw in ipairs(list) do
+    steps[#steps + 1] = { cmd = "talisman info " .. tkw, kind = "info", kw = tkw }
+  end
+  return steps
+end
+
+function M.scan(setKw)
+  M.stopScan(true)
+  -- Whatever was half read before is not what the scan will be waiting for.
+  S.cap, S.paging = nil, false
+  local queue
+  if setKw and setKw ~= "" then
+    setKw = setKw:lower()
+    queue = { { cmd = "talisman set " .. setKw, kind = "set", then_ = "setInfo" } }
+    M.data.focus = M.data.sets[setKw] and setKw or M.data.focus
+  else
+    -- LIST rather than SETS: it prints the same sets table, after the
+    -- talismans you have done, which is the only place those are listed.
+    queue = {
+      { cmd = "talisman list", kind = "sets", kinds = { tlist = true } },
+      { cmd = "talisman pieces", kind = "pieces", then_ = "heldInfo" },
+    }
+  end
+  S.scan = { queue = queue, heard = 0, missed = 0 }
+  scanSend()
+  return true
+end
+
+--- A capture was read; if the scan was waiting for one like it, move on.
+function M.scanHeard(cap)
+  local scan = S.scan
+  if not (scan and scan.step and scan.step.kind == cap.kind) then return false end
+  -- INFO for some other talisman, typed meanwhile, is not the answer.
+  if scan.step.kw and cap.kw ~= scan.step.kw then return false end
+  if scan.timer then pcall(killTimer, scan.timer); scan.timer = nil end
+  scan.heard = scan.heard + 1
+  local after = scan.step.then_
+  if after == "heldInfo" then
+    local todo = {}
+    for _, tkw in ipairs(M.heldTalismans()) do
+      if not M.data.talismans[tkw] then todo[#todo + 1] = tkw end
+    end
+    for _, step in ipairs(infoFor(todo)) do scan.queue[#scan.queue + 1] = step end
+  elseif after == "setInfo" then
+    local list = {}
+    for _, t in ipairs(cap.rows or {}) do list[#list + 1] = t.kw end
+    for _, step in ipairs(infoFor(list)) do scan.queue[#scan.queue + 1] = step end
+    M.data.focus = cap.key or cap.kw
+    M.save()
+  end
+  scan.step = nil
+  scanSend()
+  return true
+end
+
+function M.scanTimeout()
+  local scan = S.scan
+  if not scan then return end
+  scan.timer = nil
+  scan.missed = scan.missed + 1
+  scan.step = nil
+  scanSend()
+end
+
+function M.stopScan(quiet)
+  local scan = S.scan
+  if not scan then return false end
+  if scan.timer then pcall(killTimer, scan.timer) end
+  S.scan = nil
+  if not quiet then log("scan stopped") end
+  return true
+end
+
+-- ------------------------------------------------------------------ commands
+
+-- How long a typed `TALISMAN PIECES &lt;t&gt;` names the talisman for the output
+-- that answers it.
+M.ASKED_FOR = 10
+
+--- Every command sent, whoever sent it: kept only when it asks for one
+--- talisman's pieces, since that output does not say whose they are.
+function M.onSend(cmd)
+  local kw = type(cmd) == "string" and cmd:lower():match("^%s*talisman%s+pieces%s+(%S+)%s*$")
+  if kw then S.asked = { kw = kw, at = M.now() } end
+end
+
+function M.setFocus(kw)
+  M.data.focus = (kw or ""):lower()
+  M.show(true)
+  return M.data.focus
+end
+
+-- The first words build.py's aliases answer to. Anything else after `tals`
+-- would otherwise go to the game as a command.
+M.WORDS = { show = true, hide = true, all = true, set = true, scan = true, stop = true, diag = true }
+
+--- `tals &lt;anything&gt;`: Mudlet runs every alias that matches, so this fires
+--- alongside the real ones too, and says something only when none of them did.
+function M.unknown(rest)
+  local word, arg = (rest or ""):match("^(%S+)%s*(.-)%s*$")
+  word = word and word:lower()
+  if word == "set" and arg == "" then
+    log("tals set &lt;set&gt;: which set? `tals` lists the commands")
+    return false
+  end
+  if word and M.WORDS[word] and (word == "set" or word == "scan" or arg == "") then
+    return true
+  end
+  log("`tals " .. (rest or "") .. "` is not a command here; `tals` lists them")
+  return false
+end
+
+function M.show(on)
+  M.data.shown = on and true or false
+  M.save()
+  if on then
+    M.open()
+    M.redraw()
+  else
+    pcall(hideWindow, M.WINDOW)
+  end
+  return M.data.shown
+end
+
+local function count(t)
+  local n = 0
+  for _ in pairs(t) do n = n + 1 end
+  return n
+end
+
+function M.summary()
+  local d = M.data
+  local pieces = 0
+  for _, row in ipairs(d.held) do pieces = pieces + row.count end
+  return string.format("%d sets, %d talismans read, %d pieces of %d talismans held%s",
+    #d.setOrder, count(d.talismans), pieces, #M.heldTalismans(),
+    d.heldAt &gt; 0 and (" (read " .. os.date("%Y-%m-%d %H:%M", d.heldAt) .. ")") or "")
+end
+
+function M.report()
+  log("AchaeaTalismans " .. M.VERSION .. ": " .. M.summary())
+  for _, c in ipairs(M.COMMANDS or {}) do
+    cecho("  &lt;white&gt;" .. pad(c.usage, 18) .. "&lt;reset&gt; " .. c.help .. "\n")
+  end
+  M.show(true)
+end
+
+function M.diag()
+  log("AchaeaTalismans " .. M.VERSION .. " build " .. M.BUILD)
+  echo("  " .. M.summary() .. "\n")
+  echo("  completed: " .. count(M.data.completed) .. " talismans\n")
+  echo("  window:    " .. (M.data.shown and "shown" or "hidden") ..
+       ", " .. (M.data.focus ~= "" and ("set " .. M.data.focus) or "all held") .. "\n")
+  echo("  reading:   " .. (S.cap and (S.cap.kind .. (S.cap.paused and ", paged" or "")) or "nothing") ..
+       "; " .. S.read .. " outputs read since start\n")
+  echo("  scan:      " .. (S.scan and ((S.scan.step and S.scan.step.cmd or "between steps") ..
+       ", " .. #S.scan.queue .. " to go") or "none") .. "\n")
+  echo("  triggers:  " .. #S.triggers .. " (1 is right; more means a second copy)\n")
+  echo("  saved in:  " .. M.path() .. " (" .. S.loaded .. ")\n")
+end
+
+-- --------------------------------------------------------------- start / stop
+
+function M.stop()
+  for _, id in ipairs(S.triggers) do pcall(killTrigger, id) end
+  S.triggers = {}
+  for _, id in ipairs(S.handlers or {}) do pcall(killAnonymousEventHandler, id) end
+  S.handlers = {}
+  M.stopScan(true)
+  S.cap = nil
+  return true
+end
+
+--- Removing the package takes its aliases and its script and leaves its temp
+--- trigger and window behind. `sysUninstall` is raised however the package
+--- was installed, before anything is removed, and for every package, so the
+--- name is checked.
+function M.onUninstall(_, name)
+  if name ~= M.PACKAGE then return false end
+  M.stop()
+  pcall(hideWindow, M.WINDOW)
+  return true
+end
+
+function M.start()
+  M.stop()
+  -- Every line, because a listing is told apart by its header and read to
+  -- its end, and the lines in between have nothing in common to match on.
+  -- Outside a listing a line costs a handful of string.find calls.
+  S.triggers = {
+    tempRegexTrigger("^", function() M.feed(line) end),
+  }
+  S.handlers = {
+    registerAnonymousEventHandler("sysUninstall", M.onUninstall),
+    registerAnonymousEventHandler("sysDataSendRequest", function(_, cmd) M.onSend(cmd) end),
+  }
+  return true
+end
+
+M.load()
+M.start()
+if M.data.shown then pcall(M.redraw) end
+
+-- Generated by build.py from its ALIASES table. Do not edit here.
+AchaeaTalismans.BUILD = "dbc77596"
+AchaeaTalismans.COMMANDS = {
+    { usage = "tals", help = "show the window, what has been read so far, and this list" },
+    { usage = "tals show|hide", help = "open or close the window" },
+    { usage = "tals all", help = "list every talisman you hold pieces of" },
+    { usage = "tals set &lt;set&gt;", help = "list one set's talismans instead" },
+    { usage = "tals scan", help = "send TALISMAN LIST and PIECES, then INFO for what you hold" },
+    { usage = "tals scan &lt;set&gt;", help = "send TALISMAN SET &lt;set&gt;, then INFO for each of its talismans" },
+    { usage = "tals stop", help = "stop a scan" },
+    { usage = "tals diag", help = "build stamp, what is stored, where it is saved" },
+    { usage = "tals &lt;anything else&gt;", help = "says it is not a command, rather than sending it to the game" },
+}
+</script>
+            <eventHandlerList />
+        </Script>
+    </ScriptPackage>
+    <AliasPackage>
+        <AliasGroup isActive="yes" isFolder="yes">
+            <name>AchaeaTalismans</name>
+            <script></script>
+            <command></command>
+            <packageName>AchaeaTalismans</packageName>
+            <regex></regex>
+            <Alias isActive="yes" isFolder="no">
+                <name>help</name>
+                <script>AchaeaTalismans.report()</script>
+                <command></command>
+                <packageName>AchaeaTalismans</packageName>
+                <regex>^tals$</regex>
+            </Alias>
+            <Alias isActive="yes" isFolder="no">
+                <name>show</name>
+                <script>AchaeaTalismans.show(matches[2] == "show")</script>
+                <command></command>
+                <packageName>AchaeaTalismans</packageName>
+                <regex>^tals\s+(show|hide)$</regex>
+            </Alias>
+            <Alias isActive="yes" isFolder="no">
+                <name>all</name>
+                <script>AchaeaTalismans.setFocus("")</script>
+                <command></command>
+                <packageName>AchaeaTalismans</packageName>
+                <regex>^tals\s+all$</regex>
+            </Alias>
+            <Alias isActive="yes" isFolder="no">
+                <name>set</name>
+                <script>AchaeaTalismans.setFocus(matches[2])</script>
+                <command></command>
+                <packageName>AchaeaTalismans</packageName>
+                <regex>^tals\s+set\s+(\S+)$</regex>
+            </Alias>
+            <Alias isActive="yes" isFolder="no">
+                <name>scan</name>
+                <script>AchaeaTalismans.scan()</script>
+                <command></command>
+                <packageName>AchaeaTalismans</packageName>
+                <regex>^tals\s+scan$</regex>
+            </Alias>
+            <Alias isActive="yes" isFolder="no">
+                <name>scanset</name>
+                <script>AchaeaTalismans.scan(matches[2])</script>
+                <command></command>
+                <packageName>AchaeaTalismans</packageName>
+                <regex>^tals\s+scan\s+(\S+)$</regex>
+            </Alias>
+            <Alias isActive="yes" isFolder="no">
+                <name>stop</name>
+                <script>AchaeaTalismans.stopScan()</script>
+                <command></command>
+                <packageName>AchaeaTalismans</packageName>
+                <regex>^tals\s+stop$</regex>
+            </Alias>
+            <Alias isActive="yes" isFolder="no">
+                <name>diag</name>
+                <script>AchaeaTalismans.diag()</script>
+                <command></command>
+                <packageName>AchaeaTalismans</packageName>
+                <regex>^tals\s+diag$</regex>
+            </Alias>
+            <Alias isActive="yes" isFolder="no">
+                <name>unknown</name>
+                <script>AchaeaTalismans.unknown(matches[2])</script>
+                <command></command>
+                <packageName>AchaeaTalismans</packageName>
+                <regex>^tals\s+(.*)$</regex>
+            </Alias>
+        </AliasGroup>
+    </AliasPackage>
+</MudletPackage>
