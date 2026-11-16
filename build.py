@@ -101,7 +101,7 @@ ALIASES: list[tuple[str, str, str, str, str]] = [
         r"^tals\s+scan$",
         "AchaeaTalismans.scan()",
         "tals scan",
-        "send TALISMAN SETS and PIECES, then INFO for what you hold",
+        "send TALISMAN LIST and PIECES, then INFO for what you hold",
     ),
     (
         "scanset",
@@ -123,6 +123,17 @@ ALIASES: list[tuple[str, str, str, str, str]] = [
         "AchaeaTalismans.diag()",
         "tals diag",
         "build stamp, what is stored, where it is saved",
+    ),
+    # Mudlet runs every alias that matches, so this fires alongside each of
+    # the above as well; AchaeaTalismans.unknown says something only when the
+    # words are none of theirs. Without it a mistyped `tals` command would go
+    # to the game.
+    (
+        "unknown",
+        r"^tals\s+(.*)$",
+        "AchaeaTalismans.unknown(matches[2])",
+        "tals <anything else>",
+        "says it is not a command, rather than sending it to the game",
     ),
 ]
 
@@ -204,8 +215,8 @@ It reads what Achaea prints for `TALISMAN PIECES`, `TALISMAN INFO`,
 and draws each talisman's pieces as bars:
 
 ```
-◐ a Red Dragon Talisman (reddragon)  0/8 ready, 2%
-  claw             L7    ██░░░░░░░░░░░░░░ 11/64
+◐ a Red Dragon Talisman (reddragon)  0/8 ready, 4%
+  claw             L7    █████░░░░░░░░░░░ 22/64
   heart            L7    ░░░░░░░░░░░░░░░░ 0/64
 ```
 
@@ -219,7 +230,7 @@ tals scan
 tals set dragon
 ```
 
-`tals scan` sends `TALISMAN SETS` and `TALISMAN PIECES`, then `TALISMAN INFO`
+`tals scan` sends `TALISMAN LIST` and `TALISMAN PIECES`, then `TALISMAN INFO`
 for each talisman you hold pieces of, one at a time. Below the talismans the
 window lists every set, with a mark per talisman: done, started or not.
 `tals` is the full command list.

@@ -123,21 +123,21 @@ local PIECES = table.concat({
   "      golddragonpieces",
   "B 3   a Gold Dragon's eye               1     Dragon     golddragoneye",
   "      silverdragonpieces",
-  "B 1   a Silver Dragon's claw            2     Dragon     silverdragonclaw",
+  "B 2   a Silver Dragon's claw            1     Dragon     silverdragonclaw",
   "[Type MORE if you wish to continue reading. (30% shown)]",
   PROMPT,
   PROMPT .. "more",
   "[File continued via MORE]",
-  "B 2   a Silver Dragon's claw            3     Dragon     silverdragonclaw",
-  "B 1   a Silver Dragon's claw            1     Dragon     silverdragonclaw",
+  "B 1   a Silver Dragon's claw            2     Dragon     silverdragonclaw",
+  "B 1   a Silver Dragon's claw            3     Dragon     silverdragonclaw",
   "B 1   a Silver Dragon's scale           4     Dragon     silverdragonscale",
-  "B 1   a Silver Dragon bone              2     Dragon     silverdragonbone",
+  "B 1   a Silver Dragon bone              3     Dragon     silverdragonbone",
   "      greendragonpieces",
   "B 1   a Green Dragon's tooth            1     Dragon     greendragontooth",
   "      reddragonpieces",
-  "B 1   a Red Dragon's claw               1     Dragon     reddragonclaw",
   "B 1   a Red Dragon's claw               2     Dragon     reddragonclaw",
-  "B 1   a Red Dragon's claw               4     Dragon     reddragonclaw",
+  "B 1   a Red Dragon's claw               3     Dragon     reddragonclaw",
+  "B 1   a Red Dragon's claw               5     Dragon     reddragonclaw",
   "[Type MORE if you wish to continue reading. (60% shown)]",
   PROMPT .. "more",
   "more",
@@ -163,11 +163,11 @@ local TPIECES_SILVER = table.concat({
   PROMPT .. "talisman pieces silverdragon",
   "    Num Name                             Level Set       Keyword                  ",
   "----------------------------------------------------------------------------------",
+  "  B (2) a Silver Dragon's claw           1     dragon    silverdragonclaw",
   "  B (1) a Silver Dragon's claw           2     dragon    silverdragonclaw",
-  "  B (2) a Silver Dragon's claw           3     dragon    silverdragonclaw",
-  "  B (1) a Silver Dragon's claw           1     dragon    silverdragonclaw",
+  "  B (1) a Silver Dragon's claw           3     dragon    silverdragonclaw",
   "  B (1) a Silver Dragon's scale          4     dragon    silverdragonscale",
-  "  B (1) a Silver Dragon bone             2     dragon    silverdragonbone",
+  "  B (1) a Silver Dragon bone             3     dragon    silverdragonbone",
   "----------------------------------------------------------------------------------",
   PROMPT,
 }, "\n")
@@ -177,7 +177,7 @@ local SETS_ROWS = {
   "Azatlan                                       0/7       azatlan",
   "Wonders                                       0/6       wonders",
   "Miscellaneous                                 0/4       misc",
-  "Historical                                    1/12      historical",
+  "Historical                                    0/12      historical",
   "Conclave                                      0/12      conclave",
   "Marks                                         0/19      marks",
   "Seafaring                                     0/15      seafaring",
@@ -187,7 +187,7 @@ local SETS_ROWS = {
   "forays                                        0/6       forays",
   "cities                                        0/6       cities",
   "monks                                         0/8       monks",
-  "elemental                                     0/12      elemental",
+  "elemental                                     1/12      elemental",
   "yggdrasil                                     0/11      yggdrasil",
   "contenders                                    0/8       contenders",
   "underworld                                    0/8       underworld",
@@ -226,12 +226,12 @@ local LIST = table.concat({
   PROMPT .. "talisman list",
   "Name                                          Set       Keyword             ",
   RULE79,
-  "a Votive of Rememberance                      Historica votive",
+  "a miniature Air Elemental                     elemental airelemental",
   RULE79,
   "",
   "Name                                          Set       Keyword             ",
   RULE79,
-  "a Votive of Rememberance                      Historica votive",
+  "a miniature Air Elemental                     elemental airelemental",
   RULE79,
   "",
   setsTable(8, 48),
@@ -329,8 +329,8 @@ check(M.data.heldAt > 0, "when it was read")
 check(SAVED and #SAVED.held == 18, "what was read is saved")
 
 check(M.units(1) == 1 and M.units(3) == 4 and M.units(7) == 64, "a level is a doubling")
-check(M.heldUnits("silverdragonclaw") == 2 + 8 + 1, "every level of a keyword counts")
-check(M.heldUnits("reddragonclaw") == 1 + 2 + 8, "1, 2 and 4 are 11 level-1 pieces")
+check(M.heldUnits("silverdragonclaw") == 2 + 2 + 4, "every level of a keyword counts")
+check(M.heldUnits("reddragonclaw") == 2 + 4 + 16, "2, 3 and 5 are 22 level-1 pieces")
 check(#M.heldTalismans() == 9, "nine talismans held, got " .. #M.heldTalismans())
 
 -- Before INFO, a talisman shows only what is held.
@@ -346,8 +346,8 @@ check(#red.pieces == 8 and red.pieces[8].kw == "reddragonbelly" and red.pieces[8
       "eight pieces, the belly at level 3")
 check(red.brief == "The power to change into a Red Dragon", "the brief")
 local p = M.progress("reddragon")
-check(p.need == 7 * 64 + 4 and p.have == 11 and p.ready == 0, "11 of 452")
-check(p.slots[1].label == "claw" and p.slots[1].have == 11 and p.slots[1].need == 64, "the claw slot")
+check(p.need == 7 * 64 + 4 and p.have == 22 and p.ready == 0, "22 of 452")
+check(p.slots[1].label == "claw" and p.slots[1].have == 22 and p.slots[1].need == 64, "the claw slot")
 check(M.status("reddragon") == "started", "started")
 
 game(INFO_HARNESS)
@@ -368,7 +368,7 @@ M.data.talismans.test = nil
 
 game(SETS)
 check(#M.data.setOrder == 29, "29 sets, got " .. #M.data.setOrder)
-check(M.data.sets.historical.done == 1 and M.data.sets.historical.total == 12, "Historical 1/12")
+check(M.data.sets.elemental.done == 1 and M.data.sets.elemental.total == 12, "elemental 1/12")
 check(M.data.sets.misc.name == "Miscellaneous", "a name unlike its keyword")
 check(M.setKey("Miscellaneous") == "misc" and M.setKey("Dragon") == "dragon", "a set by its name")
 
@@ -381,32 +381,42 @@ check(M.data.setOrder[1] == "dragon" and #M.data.setOrder == 29, "a known set is
 
 -- ------------------------------------------------------------------- LIST
 
-M.data.sets.historical.done = 0
-game(LIST)
-check(M.data.completed.votive and M.data.completed.votive.name == "a Votive of Rememberance", "the votive is done")
-check(count(M.data.completed) == 1, "and nothing else")
-check(M.data.sets.historical.done == 1, "the sets table inside LIST is read too")
-check(M.status("votive") == "done", "done")
+M.data.sets.elemental.done = 0
+-- A tell arriving mid-table is three words and more, and is not a row.
+game((LIST:gsub("(elemental airelemental\n)", '%1Somebody tells you, "hello there friend"\n', 1)))
+check(M.data.completed.airelemental and M.data.completed.airelemental.name == "a miniature Air Elemental",
+      "the air elemental is done")
+check(count(M.data.completed) == 1, "and nothing else, the tell included")
+check(M.data.sets.elemental.done == 1, "the sets table inside LIST is read too")
+check(M.status("airelemental") == "done", "done")
+-- A talisman table after the sets table, where the incomplete ones go, or
+-- one on its own, is not taken as done: nothing says what it lists.
+game(LIST:gsub("\nYou have no incomplete talismans to show%.",
+  "\nName                                          Set       Keyword             \n" .. RULE79 ..
+  "\nthe tears of the Sea                          elemental seatears\n" .. RULE79))
+check(not M.data.completed.seatears, "a talisman table after the sets is not done")
+game(SETS)
+check(not M.data.completed.seatears, "nor once a later SETS arrives")
 
 -- -------------------------------------------------- PIECES for one talisman
 
 -- Pretend the silver claws were combined since: fewer rows, read in place.
 local before = #M.data.held
-game(TPIECES_SILVER:gsub("  B %(2%) a Silver Dragon's claw           3     dragon    silverdragonclaw\n", ""))
+game((TPIECES_SILVER:gsub("  B %(1%) a Silver Dragon's claw           3     dragon    silverdragonclaw\n", "")))
 check(#M.data.held == before - 1, "one talisman's rows replace only its own")
-check(M.heldUnits("silverdragonclaw") == 3, "the claws now sum to 3")
+check(M.heldUnits("silverdragonclaw") == 4, "the claws now sum to 4")
 check(M.data.held[5].kw == "silverdragonclaw" and M.data.held[5].group == "silverdragon",
       "the new rows sit where the old ones were, with their talisman")
-check(M.heldUnits("reddragonclaw") == 11, "other talismans untouched")
+check(M.heldUnits("reddragonclaw") == 22, "other talismans untouched")
 game(TPIECES_SILVER)
-check(#M.data.held == before and M.heldUnits("silverdragonclaw") == 11, "and back")
+check(#M.data.held == before and M.heldUnits("silverdragonclaw") == 8, "and back")
 
 -- --------------------------------------------------------------- the window
 
 M.setFocus("")
 local w = WINDOWS[M.WINDOW]
-check(w:find("a Red Dragon Talisman", 1, true) and w:find("0/8 ready, 2%", 1, true), "the red dragon's line")
-check(w:find("11/64", 1, true), "the claw's count")
+check(w:find("a Red Dragon Talisman", 1, true) and w:find("0/8 ready, 4%", 1, true), "the red dragon's line")
+check(w:find("22/64", 1, true), "the claw's count")
 check(w:find("Miscellaneous", 1, true), "the sets are listed")
 check(not w:find("stratospheric", 1, true), "a talisman with nothing held is not in the all view")
 M.setFocus("Dragon")
@@ -415,7 +425,7 @@ check(M.data.focus == "dragon" and w:find("0/6 done", 1, true), "one set")
 check(w:find("(golddragon)", 1, true) and w:find("needs not read", 1, true), "its talismans, read or not")
 local foundLink = false
 for _, l in ipairs(LINKS) do
-  if l.win == M.WINDOW and l.code == "AchaeaTalismans.setFocus('misc')" then foundLink = true end
+  if l.win == M.WINDOW and l.code == 'AchaeaTalismans.setFocus("misc")' then foundLink = true end
 end
 check(foundLink, "a set's name is a link to it")
 M.setFocus("")
@@ -465,10 +475,10 @@ check(M.state.cap == nil and #M.data.held == heldNow, "a stale page is not finis
 SENT = {}
 M.data.talismans = { reddragon = M.data.talismans.reddragon }
 M.scan()
-check(SENT[1] == "talisman sets" and #SENT == 1, "a scan starts with SETS")
-game(SETS)
+check(SENT[1] == "talisman list" and #SENT == 1, "a scan starts with LIST")
+game(LIST)
 check(SENT[2] == "more", "a scan answers the pager for its own listing")
-check(SENT[3] == "talisman pieces", "then PIECES, once SETS is read")
+check(SENT[3] == "talisman pieces", "then PIECES, once LIST's sets table is read")
 game(PIECES)
 check(SENT[4] == "more" and SENT[5] == "more" and SENT[6] == "more", "three pages")
 check(SENT[7] == "talisman info blackdragon", "then INFO for the first talisman held and not read")
@@ -489,6 +499,98 @@ game(SET_DRAGON)
 check(SENT[2] == "talisman info blackdragon", "then INFO for each of its talismans")
 check(M.data.focus == "dragon", "and the window turns to it")
 M.stopScan(true)
+
+-- ------------------------------------------- what review found, held down
+
+local PAGED_HEAD = "Num   Name                              Level Set        Keyword\n" ..
+  "----------------------------------------------------------------------------------\n" ..
+  "      reddragonpieces\n" ..
+  "B 1   a Red Dragon's claw               1     Dragon     reddragonclaw\n" ..
+  "[Type MORE if you wish to continue reading. (28% shown)]\n" .. PROMPT
+
+-- A paged table left unread, then a help scroll that pages and is read on:
+-- the scroll's MORE is a second page break, and its lines are not the table's.
+heldNow = #M.data.held
+game(PAGED_HEAD)
+check(M.state.cap and M.state.cap.paused, "a table waits on its page")
+game(PROMPT .. "help talismans\n19.24 Talismans\n[Type MORE if you wish to continue reading. (19% shown)]")
+check(M.state.cap == nil, "another page break lets the waiting table go")
+game(PROMPT .. "more\n[File continued via MORE]\n" ..
+     "----------------------------------------------------------------------------------\n" .. PROMPT)
+check(#M.data.held == heldNow, "the scroll did not finish the table, nor replace what was held")
+
+-- A run of dashes of another length does not close a table.
+game("Num   Name                              Level Set        Keyword\n" ..
+     "----------------------------------------------------------------------------------\n" ..
+     "      reddragonpieces\n" ..
+     "B 1   a Red Dragon's claw               1     Dragon     reddragonclaw\n" ..
+     "-------------------------------------------------------------------------------")
+check(M.state.cap and M.state.cap.kind == "pieces", "a 79-dash line inside an 82-dash table is not its end")
+-- A tell in the middle of a table is not a row.
+game('Somebody tells you, "1 2 3 four five 6 seven"\n' ..
+     "----------------------------------------------------------------------------------")
+check(#M.data.held == 1 and M.data.held[1].kw == "reddragonclaw", "only the real row was read")
+game(PIECES)
+check(#M.data.held == 18, "and the full listing puts it back")
+
+-- A scan answers only the pager of a listing it is waiting for.
+game(PAGED_HEAD)
+M.scan()
+check(M.state.cap == nil, "a scan lets go of a half-read listing")
+SENT = {}
+game(PROMPT .. "help talismans\n19.24 Talismans\n[Type MORE if you wish to continue reading. (19% shown)]")
+check(#SENT == 0, "a help scroll paged mid-scan is not answered")
+game(PROMPT .. "more\n[File continued via MORE]\n" .. PROMPT)
+M.stopScan(true)
+
+-- One talisman's pieces read before anything else: the command says whose.
+AchaeaTalismans, TRIGGERS, HANDLERS = nil, {}, {}
+load()
+M = AchaeaTalismans
+raise("sysDataSendRequest", "TALISMAN PIECES silverdragon")
+game(TPIECES_SILVER)
+check(#M.heldTalismans() == 1 and M.heldTalismans()[1] == "silverdragon", "the typed command names them")
+check(M.data.heldAt > 0, "and the time they were read is kept")
+CLOCK = CLOCK + M.ASKED_FOR + 1
+M.data.held = {}
+game(TPIECES_SILVER)
+check(#M.heldTalismans() == 0 and #M.data.held == 5, "too late to tell whose, kept anyway")
+check(WINDOWS[M.WINDOW]:find("Pieces of no known talisman", 1, true), "and shown")
+
+-- TALISMAN SET before SETS: stored under the keyword SET printed, then taken
+-- over by SETS's own keyword for the same set.
+game(PROMPT .. "talisman set misc\nName: Miscellaneous\nPartial name: miscellaneous\n" ..
+     "Description: Talismans that fit nowhere else.\nTalismans:\na ball of yarn (yarn)\n" .. PROMPT)
+check(M.data.sets.miscellaneous and #M.data.sets.miscellaneous.talismans == 1, "kept under what SET said")
+check(WINDOWS[M.WINDOW]:find("Miscellaneous  <dim_grey>?", 1, true), "no counts shown before SETS gives them")
+game(SETS)
+check(M.data.sets.misc.talismans and M.data.sets.miscellaneous == nil, "SETS takes it over as misc")
+
+-- The window opens once; a redraw after it was closed does not reopen it.
+local opened = OPENED
+game(INFO_RED)
+check(OPENED == opened, "reading something does not reopen the window")
+M.show(true)
+check(OPENED == opened + 1, "asking for it does")
+
+-- A keyword with a quote in it cannot break, or run, a link's code.
+M.data.sets["o'brien"] = { name = "O'Brien", done = 0, total = 1 }
+M.data.setOrder[#M.data.setOrder + 1] = "o'brien"
+M.setFocus("o'brien")
+for _, l in ipairs(LINKS) do
+  check(loadstring(l.code), "link code compiles: " .. l.code)
+end
+M.data.sets["o'brien"] = nil
+table.remove(M.data.setOrder)
+M.setFocus("")
+
+-- `tals` with words no alias answers to says so; the real ones stay quiet.
+ECHOED = {}
+check(M.unknown("scan dragon") and M.unknown("diag") and M.unknown("set dragon"), "real commands pass")
+check(#ECHOED == 0, "quietly")
+check(M.unknown("foo") == false and M.unknown("set") == false and M.unknown("diag now") == false,
+      "anything else is caught")
+check(#ECHOED == 3, "and said")
 
 -- --------------------------------------------------------- saving, loading
 
@@ -534,8 +636,8 @@ for fn in src:gmatch("AchaeaTalismans%.(%w+)%(") do
   check(type(M[fn]) == "function", "an alias calls AchaeaTalismans." .. fn .. ", which exists")
   called = called + 1
 end
-check(called == 8, "eight aliases call into the package, got " .. called)
-check(src:find("11/64", 1, true) and src:find("0/8 ready, 2%", 1, true),
+check(called == 9, "nine aliases call into the package, got " .. called)
+check(src:find("22/64", 1, true) and src:find("0/8 ready, 4%", 1, true),
       "the description's example is what the window draws for the capture")
 
 print(("ok: %d checks"):format(passed))
