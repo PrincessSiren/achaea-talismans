@@ -103,110 +103,71 @@ local function load() assert(loadfile(HERE .. "/AchaeaTalismans.lua"))() end
 
 -- ------------------------------------------------------------- the listings
 
-local PROMPT = "H:4060|100% M:4779|95% E:17790|100% W:20610|100% "
+-- A prompt in the game's shape, with made-up vitals: the package never reads it.
+local PROMPT = "H:1000|100% M:1000|100% E:4000|100% W:4000|100% "
 
--- TALISMAN PIECES, 2026-11-16, with the pager where the game put it. The
--- prompt and the typed `more` are the lines a page break attests.
+-- TALISMAN PIECES in the game's layout, column for column, with the pager in
+-- each of the three places it was seen to break (prompt then `more`; `more`
+-- typed twice; straight after a heading). The rows are a made-up collection,
+-- not anyone's: the layout is what is under test, and every case the parser
+-- meets is kept: all three sources, a count above 1, a name cut by its
+-- column, a keyword unlike its talisman's, a level-4 piece for a level-3 slot.
 local PIECES = table.concat({
   PROMPT .. "talisman pieces",
   "Num   Name                              Level Set        Keyword                  ",
   "----------------------------------------------------------------------------------",
   "      blackdragonpieces",
   "B 1   a Black Dragon's heart            1     Dragon     blackdragonheart",
-  "B 1   a Black Dragon's tooth            1     Dragon     blackdragontooth",
-  "B 1   a Black Dragon's tooth            2     Dragon     blackdragontooth",
-  "B 2   a Black Dragon's scale            1     Dragon     blackdragonscale",
-  "B 3   a Black Dragon's scale            3     Dragon     blackdragonscale",
-  "B 2   Black Dragon leather              2     Dragon     blackdragonleather",
+  "B 2   a Black Dragon's scale            2     Dragon     blackdragonscale",
+  "B 1   Black Dragon leather              1     Dragon     blackdragonleather",
   "      golddragonpieces",
-  "B 1   a Gold Dragon's heart             1     Dragon     golddragonheart",
-  "B 1   Gold Dragon leather               2     Dragon     golddragonleather",
-  "B 5   a Gold Dragon's eye               1     Dragon     golddragoneye",
-  "      bluedragonpieces",
-  "B 2   a Blue Dragon's heart             2     Dragon     bluedragonheart",
-  "B 1   Blue Dragon leather               3     Dragon     bluedragonleather",
-  "B 3   a Blue Dragon's eye               1     Dragon     bluedragoneye",
-  "B 1   a Blue Dragon's eye               3     Dragon     bluedragoneye",
+  "B 3   a Gold Dragon's eye               1     Dragon     golddragoneye",
   "      silverdragonpieces",
   "B 1   a Silver Dragon's claw            2     Dragon     silverdragonclaw",
-  "[Type MORE if you wish to continue reading. (28% shown)]",
+  "[Type MORE if you wish to continue reading. (30% shown)]",
   PROMPT,
   PROMPT .. "more",
   "[File continued via MORE]",
-  "B 3   a Silver Dragon's claw            3     Dragon     silverdragonclaw",
+  "B 2   a Silver Dragon's claw            3     Dragon     silverdragonclaw",
   "B 1   a Silver Dragon's claw            1     Dragon     silverdragonclaw",
   "B 1   a Silver Dragon's scale           4     Dragon     silverdragonscale",
-  "B 1   Silver Dragon leather             1     Dragon     silverdragonleather",
   "B 1   a Silver Dragon bone              2     Dragon     silverdragonbone",
-  "B 1   a Silver Dragon bone              1     Dragon     silverdragonbone",
-  "B 1   a Silver Dragon's eye             2     Dragon     silverdragoneye",
   "      greendragonpieces",
-  "B 1   a Green Dragon's claw             1     Dragon     greendragonclaw",
-  "B 1   a Green Dragon's tooth            2     Dragon     greendragontooth",
-  "B 1   a Green Dragon's scale            3     Dragon     greendragonscale",
-  "B 1   a Green Dragon's scale            2     Dragon     greendragonscale",
-  "B 1   a Green Dragon bone               1     Dragon     greendragonbone",
-  "B 1   a Green Dragon bone               3     Dragon     greendragonbone",
-  "B 1   a Green Dragon bone               2     Dragon     greendragonbone",
-  "B 1   a Green Dragon's eye              3     Dragon     greendragoneye",
+  "B 1   a Green Dragon's tooth            1     Dragon     greendragontooth",
   "      reddragonpieces",
   "B 1   a Red Dragon's claw               1     Dragon     reddragonclaw",
   "B 1   a Red Dragon's claw               2     Dragon     reddragonclaw",
   "B 1   a Red Dragon's claw               4     Dragon     reddragonclaw",
-  "[Type MORE if you wish to continue reading. (56% shown)]",
+  "[Type MORE if you wish to continue reading. (60% shown)]",
   PROMPT .. "more",
   "more",
   "[File continued via MORE]",
-  "      kinkajoupieces",
-  "B 1   a collar for a kinkajou           1     Azatlan    kinkajoucollar",
   "      cloverboxpieces",
-  "Q 1   the contents of a cargo crate of  1     Seafaring  cloverboxclovers",
   "Q 1   the sides from a cargo crate of c 1     Seafaring  cloverboxsides",
-  "      xpplaquepieces",
-  "Q 1   the mounting plate for an etched  1     Seafaring  xpplaquemount",
-  "      arankeshfeatherpieces",
-  "F 1   The spine of a feather from Aran' 1     forays     arankeshfeatherspine",
-  "F 1   The spine of a feather from Aran' 3     forays     arankeshfeatherspine",
-  "F 1   The down from a feather of Aran'K 2     forays     arankeshfeatherdown",
-  "F 1   The colouration for a feather fro 3     forays     arankeshfeathercolour",
-  "F 1   The lethally sharp edge of a feat 1     forays     arankeshfeatheredge",
   "      icossemirrorpieces",
-  "F 1   A golden mirror frame             1     forays     goldmirrorframe",
   "F 1   A golden mirror frame             2     forays     goldmirrorframe",
-  "F 1   Silvery mirror glass              3     forays     silvermirrorglass",
-  "F 1   A cursed piece of glass           2     forays     mirrorcurse",
-  "F 1   The inscription for a cursed mirr 2     forays     mirrorinscription",
+  "F 1   A cursed piece of glass           1     forays     mirrorcurse",
   "      ogrebrothpieces",
-  "[Type MORE if you wish to continue reading. (83% shown)]",
+  "[Type MORE if you wish to continue reading. (85% shown)]",
   PROMPT,
   "[File continued via MORE]",
-  "F 1   The bowl for some ogre's broth    1     forays     brothbowl",
-  "F 1   Some special ogre spices          1     forays     brothspice",
-  "      foraymappieces",
-  "F 1   The top of a map fragment         2     forays     mapfragmenttop",
-  "F 1   The bottom of a map fragment      3     forays     mapfragmentbottom",
-  "F 1   The bottom of a map fragment      1     forays     mapfragmentbottom",
-  "F 1   The left piece of a map fragment  2     forays     mapfragmentleft",
-  "F 1   The left piece of a map fragment  1     forays     mapfragmentleft",
-  "F 1   The right piece of a map fragment 2     forays     mapfragmentright",
+  "F 2   Some special ogre spices          1     forays     brothspice",
   "      sanityskeinpieces",
   "B 1   The thread for a skein of sanity  1     underworld sanityskeinthread",
   "----------------------------------------------------------------------------------",
   PROMPT,
 }, "\n")
 
+-- PIECES <talisman>'s own layout, for the same made-up silver rows.
 local TPIECES_SILVER = table.concat({
   PROMPT .. "talisman pieces silverdragon",
   "    Num Name                             Level Set       Keyword                  ",
   "----------------------------------------------------------------------------------",
   "  B (1) a Silver Dragon's claw           2     dragon    silverdragonclaw",
-  "  B (3) a Silver Dragon's claw           3     dragon    silverdragonclaw",
+  "  B (2) a Silver Dragon's claw           3     dragon    silverdragonclaw",
   "  B (1) a Silver Dragon's claw           1     dragon    silverdragonclaw",
   "  B (1) a Silver Dragon's scale          4     dragon    silverdragonscale",
-  "  B (1) Silver Dragon leather            1     dragon    silverdragonleather",
   "  B (1) a Silver Dragon bone             2     dragon    silverdragonbone",
-  "  B (1) a Silver Dragon bone             1     dragon    silverdragonbone",
-  "  B (1) a Silver Dragon's eye            2     dragon    silverdragoneye",
   "----------------------------------------------------------------------------------",
   PROMPT,
 }, "\n")
@@ -351,11 +312,11 @@ check(count(TRIGGERS) == 1, "still one trigger after a recompile")
 
 game(PIECES)
 local held = M.data.held
-check(#held == 55, "55 rows read across three page breaks, got " .. #held)
+check(#held == 18, "18 rows read across three page breaks, got " .. #held)
 check(#SENT == 0, "reading pieces the player typed sends nothing, MORE included")
 check(held[1].kw == "blackdragonheart" and held[1].group == "blackdragon" and held[1].source == "B",
       "the first row, under its heading")
-check(held[9].kw == "golddragoneye" and held[9].count == 5, "the count is the second field")
+check(held[4].kw == "golddragoneye" and held[4].count == 3, "the count is the second field")
 local bySide
 for _, r in ipairs(held) do if r.kw == "cloverboxsides" then bySide = r end end
 check(bySide.name == "the sides from a cargo crate of c" and bySide.source == "Q",
@@ -365,12 +326,12 @@ for _, r in ipairs(held) do if r.kw == "mirrorcurse" then mirror = r end end
 check(mirror.group == "icossemirror", "a piece keyword unlike its talisman's keeps its heading")
 check(held[#held].set == "underworld" and held[#held].group == "sanityskein", "the last row")
 check(M.data.heldAt > 0, "when it was read")
-check(SAVED and #SAVED.held == 55, "what was read is saved")
+check(SAVED and #SAVED.held == 18, "what was read is saved")
 
 check(M.units(1) == 1 and M.units(3) == 4 and M.units(7) == 64, "a level is a doubling")
-check(M.heldUnits("silverdragonclaw") == 2 + 12 + 1, "every level of a keyword counts")
+check(M.heldUnits("silverdragonclaw") == 2 + 8 + 1, "every level of a keyword counts")
 check(M.heldUnits("reddragonclaw") == 1 + 2 + 8, "1, 2 and 4 are 11 level-1 pieces")
-check(#M.heldTalismans() == 14, "fourteen talismans held, got " .. #M.heldTalismans())
+check(#M.heldTalismans() == 9, "nine talismans held, got " .. #M.heldTalismans())
 
 -- Before INFO, a talisman shows only what is held.
 check(M.progress("reddragon") == nil, "no progress without INFO")
@@ -431,14 +392,14 @@ check(M.status("votive") == "done", "done")
 
 -- Pretend the silver claws were combined since: fewer rows, read in place.
 local before = #M.data.held
-game(TPIECES_SILVER:gsub("  B %(3%) a Silver Dragon's claw           3     dragon    silverdragonclaw\n", ""))
+game(TPIECES_SILVER:gsub("  B %(2%) a Silver Dragon's claw           3     dragon    silverdragonclaw\n", ""))
 check(#M.data.held == before - 1, "one talisman's rows replace only its own")
 check(M.heldUnits("silverdragonclaw") == 3, "the claws now sum to 3")
-check(M.data.held[14].kw == "silverdragonclaw" and M.data.held[14].group == "silverdragon",
+check(M.data.held[5].kw == "silverdragonclaw" and M.data.held[5].group == "silverdragon",
       "the new rows sit where the old ones were, with their talisman")
 check(M.heldUnits("reddragonclaw") == 11, "other talismans untouched")
 game(TPIECES_SILVER)
-check(#M.data.held == before and M.heldUnits("silverdragonclaw") == 15, "and back")
+check(#M.data.held == before and M.heldUnits("silverdragonclaw") == 11, "and back")
 
 -- --------------------------------------------------------------- the window
 
