@@ -70,8 +70,9 @@ typed yourself, and it does not answer the pager for them.
 
 A scan sends one command at a time and waits for its answer before sending
 the next. While it waits, it answers `MORE` for a talisman listing of the
-kind it is waiting for, including a page break between two of that
-listing's tables, and for nothing else: a help scroll or any other output
+kind it is waiting for, and for a page break straight after one of that
+listing's tables, with nothing but blank lines since, as between `TALISMAN
+LIST`'s tables. It answers nothing else: a help scroll or any other output
 paged meanwhile is left to you. A listing of that kind you type
 yourself mid-scan cannot be told apart from the scan's own, so it may be
 paged on too. A step with no answer in 8 seconds is skipped. `tals stop`
@@ -86,9 +87,10 @@ PIECES <talisman>` replaces that talisman's rows and leaves the rest alone.
 
 A listing is read only to its end. One left unfinished at a page break is
 dropped, not saved, if anything else is paged before you read on, or if you
-read on more than five minutes later. A row is only taken if its keyword
-ends the line and starts in the listing's `Keyword` column or after it, so a
-tell that arrives in the middle of a table is not read as a row.
+read on more than five minutes later. A row is only taken if it ends in a
+keyword (lower-case letters and digits) that starts in the listing's
+`Keyword` column or up to four columns after it, so a tell, a channel line or
+a timing tag that arrives in the middle of a table is not read as a row.
 
 Removing the package stops its trigger and closes its window.
 

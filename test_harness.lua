@@ -608,8 +608,8 @@ local broken = LIST:sub(1, at) ..
   LIST:sub(at + 1)
 check(broken:find("(12% shown)", 1, true), "the break is in")
 game(broken)
-check(SENT[2] == "more", "a break between LIST's tables is answered")
-check(SENT[3] == "more" and SENT[4] == "talisman pieces", "and the sets table read after it, so the scan goes on")
+check(table.concat(SENT, ",") == "talisman list,more,more,talisman pieces",
+      "both breaks answered, the one between LIST's tables and the one in its sets table, then the scan goes on")
 M.stopScan(true)
 
 -- A set name wider than its column pushes the keyword right; the row is kept.
@@ -680,6 +680,58 @@ load()
 M = AchaeaTalismans
 check(OPENED == beforeOpen + 1, "the reinstalled copy opens its window")
 check(M.state.paging == false and M.state.listed == nil, "and starts with nothing half read")
+M.data.completed = {}
+game(LIST)
+check(M.data.completed.airelemental, "and reads a listing")
+
+-- A recompile keeps the window as the player left it: closed stays closed.
+beforeOpen = OPENED
+load()
+M = AchaeaTalismans
+check(OPENED == beforeOpen, "a recompile does not reopen the window")
+
+-- ------------------------------------------- the third review, held down
+
+-- Long lines mid-table are not rows, wherever their last word falls: a
+-- quote, a timing tag, or a lower-case word too far past the column.
+local NOISE = {
+  'Somebody tells you, "I will meet you at the north gate of Antioch tomorrow, ok?"',
+  'You say, "I think we should all go to the pub afterwards"',
+  '(Market): Somebody says, "Selling a whole pile of these for cheap, tell me"',
+  "A mighty griffin soars high above the plains of Meropis. [0.43s]",
+  "A mighty griffin soars high above the windswept plains of Meropis and lands nearby",
+}
+M.data.completed = {}
+local at2 = select(2, LIST:find("elemental airelemental\n", 1, true))
+game(LIST:sub(1, at2) .. table.concat(NOISE, "\n") .. "\n" .. LIST:sub(at2 + 1))
+check(count(M.data.completed) == 1 and M.data.completed.airelemental, "no noise line was taken as a done talisman")
+local at3 = select(2, PIECES:find("silverdragonbone\n", 1, true))
+game(PIECES:sub(1, at3) .. table.concat(NOISE, "\n") .. "\n" .. PIECES:sub(at3 + 1))
+check(#M.data.held == 18, "nor as a held piece")
+
+-- The scan's between-tables MORE is for its own listing only.
+SENT = {}
+M.scan()
+local firstTable = LIST:sub(1, select(2, LIST:find("elemental airelemental\n" .. RULE79 .. "\n", 1, true)))
+game(firstTable .. PROMPT .. "help talismans\n19.24 Talismans\n[Type MORE if you wish to continue reading. (19% shown)]")
+check(table.concat(SENT, ",") == "talisman list", "a help scroll paged after the scan's table is not answered")
+M.stopScan(true)
+SENT = {}
+M.scan()
+game((LIST:gsub("\nYou have no incomplete talismans to show%.", "")) .. "\n[Type MORE if you wish to continue reading. (95% shown)]")
+check(SENT[#SENT] == "talisman pieces", "a break after the scan moved on is not answered")
+M.stopScan(true)
+game(PROMPT .. "more\n[File continued via MORE]\n" .. PROMPT)
+
+-- Only real beginnings of TALISMAN and PIECES name a talisman.
+M.state.asked = nil
+for _, cmd in ipairs({ "talk pie bob", "tall pies sam", "tale pieces x", "ta pi x" }) do
+  raise("sysDataSendRequest", cmd)
+  check(M.state.asked == nil, "not a TALISMAN PIECES: " .. cmd)
+end
+raise("sysDataSendRequest", "tali pie silver")
+check(M.state.asked and M.state.asked.kw == "silver", "a real short form is")
+M.state.asked = nil
 
 -- --------------------------------------------------------- saving, loading
 
@@ -710,6 +762,9 @@ check(M.state.loaded == "unreadable" and #M.data.held == 0, "an unreadable file 
 RAISE_ON_LOAD, STORED = false, nil
 
 -- -------------------------------------------------------------- uninstall
+
+-- This uninstalls the package, so nothing after it reads a line: a test
+-- added below needs load() first.
 
 raise("sysUninstall", "SomethingElse")
 check(count(TRIGGERS) == 1, "another package's uninstall is not ours")

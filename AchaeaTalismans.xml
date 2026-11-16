@@ -242,17 +242,22 @@ end
 --   "drop"  this was not the output it looked like
 local READ = {}
 
---- Whether a row's last field ends the line and starts in its header's
---- Keyword column or after it. In every row of every table captured it starts
---- exactly there; "or after" is for a column the game did not cut, such as a
---- set name longer than its column, which would push the keyword right. A
---- tell or other line arriving mid-table is nearly always too short to
---- reach the column, so it is not taken as a row.
+-- How far past its header's Keyword column a row's keyword may start: room
+-- for a set name a few characters wider than its column, and no more.
+M.KW_SLACK = 4
+
+--- Whether a row's last field is a keyword where the header puts keywords.
+--- In every row of every table captured, the keyword is lower-case letters
+--- and digits and starts exactly in the Keyword column. A few columns later
+--- is allowed, for a set name wider than its column that pushed it right.
+--- A tell, a channel line or a timing tag that arrives mid-table almost never
+--- ends in such a word at such a place, so it is not taken as a row.
 local function inColumn(cap, l, kw)
   local col = cap.kwCol
-  if not (col and kw and #kw &gt; 0) then return false end
+  if not (col and kw and kw:find("^[%l%d]+$")) then return false end
   local start = #l - #kw + 1
-  return start &gt;= col and l:sub(start) == kw and l:sub(start - 1, start - 1) == " "
+  return start &gt;= col and start &lt;= col + M.KW_SLACK
+    and l:sub(start - 1, start - 1) == " "
 end
 
 local function tableReader(onRow)
@@ -566,7 +571,6 @@ local function open(l)
     S.cap = { kind = kind, rules = 0, rows = {}, kwCol = l:find("Keyword", 1, true) }
   end
   S.cap.fromScan = scanWants(kind)
-  if S.cap.fromScan then S.scan.step.active = true end
   -- Talisman tables count as done only if a sets table follows them with
   -- nothing but blank lines between (M.feed lets them go otherwise).
   if kind == "sets" then
@@ -590,10 +594,10 @@ function M.feed(text)
       cap.paused, cap.pausedAt = true, M.now()
       -- Answered only for a listing the scan asked for and is waiting on.
       if cap.fromScan and S.scan then send("more", false) end
-    elseif S.scan and S.scan.step and S.scan.step.active then
-      -- Between two tables of the output the scan is waiting on, as LIST's
-      -- talisman and sets tables are: nothing is being read at this line,
-      -- but the page is still the scan's.
+    elseif S.between and S.scan and S.scan.step then
+      -- Straight after one of the scan's tables closed, with nothing but
+      -- blank lines since, and the scan still waiting on the same step: the
+      -- break falls between two tables of its listing, as LIST's are.
       send("more", false)
     end
     return
@@ -617,6 +621,8 @@ function M.feed(text)
     S.paging = false
     if cap and cap.paused then S.cap, cap = nil, nil end
   end
+  -- Between two of the scan's tables only until something else is printed.
+  if l ~= "" then S.between = false end
   -- In LIST the sets table follows the done talismans after one blank line.
   -- Any other line between, a prompt above all, means they were not one
   -- listing.
@@ -632,7 +638,16 @@ function M.feed(text)
     local verdict = READ[cap.kind](cap, l)
     if verdict == nil then return end
     S.cap = nil
-    if verdict == "done" then M.commit(cap); return end
+    if verdict == "done" then
+      local step = S.scan and S.scan.step
+      M.commit(cap)
+      -- A scan table closed, and the scan has not moved on: more of its
+      -- listing may follow, after a page break.
+      if cap.fromScan and cap.rules and step and S.scan and S.scan.step == step then
+        S.between = true
+      end
+      return
+    end
     if verdict == "pass" then M.commit(cap) end
     -- "pass" and "drop" both leave this line to be looked at afresh.
   end
@@ -973,10 +988,13 @@ M.ASKED_FOR = 10
 --- talisman's pieces, since that output does not say whose they are.
 function M.onSend(cmd)
   if type(cmd) ~= "string" then return end
-  -- `tal`, `tali` and so on for TALISMAN, and `pie` and on for PIECES, in
-  -- case the game takes them; the full words are what is captured.
-  local kw = cmd:lower():match("^%s*tal%a*%s+pie%a*%s+(%S+)%s*$")
-  if kw then S.asked = { kw = kw, at = M.now() } end
+  -- Either word may be cut short to three letters or more, in case the game
+  -- takes that (`tal pie`); the full words are what is captured. Only real
+  -- beginnings of the two words count, so `talk pie bob` does not.
+  local a, b, kw = cmd:lower():match("^%s*(%a+)%s+(%a+)%s+(%S+)%s*$")
+  if not a or #a &lt; 3 or #b &lt; 3 then return end
+  if ("talisman"):sub(1, #a) ~= a or ("pieces"):sub(1, #b) ~= b then return end
+  S.asked = { kw = kw, at = M.now() }
 end
 
 --- A talisman keyword as typed, which may be cut short (`silver` for
@@ -1086,10 +1104,10 @@ function M.stop()
   for _, id in ipairs(S.handlers or {}) do pcall(killAnonymousEventHandler, id) end
   S.handlers = {}
   M.stopScan(true)
-  -- Reading state too, and the window's: an uninstall and reinstall in the
-  -- same session keeps M.state on the global, and the new copy should start
-  -- clean and open its window again.
-  S.cap, S.paging, S.listed, S.asked, S.opened = nil, false, nil, nil, false
+  -- Reading state too: M.state lives on the global, through a recompile and
+  -- through an uninstall and reinstall in one session, and the new copy
+  -- should not pick up a listing half read by the old.
+  S.cap, S.paging, S.listed, S.asked, S.between = nil, false, nil, nil, false
   return true
 end
 
@@ -1101,6 +1119,9 @@ function M.onUninstall(_, name)
   if name ~= M.PACKAGE then return false end
   M.stop()
   pcall(hideWindow, M.WINDOW)
+  -- So a reinstall in the same session opens it again. Not in M.stop, which
+  -- every recompile runs: that would reopen a window the player had closed.
+  S.opened = false
   return true
 end
 
@@ -1124,7 +1145,7 @@ M.start()
 if M.data.shown then pcall(M.redraw) end
 
 -- Generated by build.py from its ALIASES table. Do not edit here.
-AchaeaTalismans.BUILD = "7befed67"
+AchaeaTalismans.BUILD = "b0ea250d"
 AchaeaTalismans.COMMANDS = {
     { usage = "tals", help = "show the window, what has been read so far, and this list" },
     { usage = "tals show|hide", help = "open or close the window" },
