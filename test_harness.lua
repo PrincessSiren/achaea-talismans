@@ -65,10 +65,17 @@ table.load = function(_, into)
 end
 -- Mudlet's table.save returns nil and a message when it cannot open the
 -- file; it does not raise. The stub does the same.
+-- A deep copy, as the file would be: a table shared with M.data would show
+-- a change that was never saved.
+local function deepCopy(v)
+  if type(v) ~= "table" then return v end
+  local out = {}
+  for key, value in pairs(v) do out[key] = deepCopy(value) end
+  return out
+end
 table.save = function(_, t)
   if SAVE_FAILS then return nil, "Permission denied" end
-  SAVED = {}
-  for key, value in pairs(t) do SAVED[key] = value end
+  SAVED = deepCopy(t)
 end
 os.rename = function() return true end
 local seq = 0
@@ -456,6 +463,24 @@ check(M.toggleTalisman("reddragon") == false and SAVED.openTalismans.reddragon =
 M.openAll(true)
 w = WINDOWS[M.WINDOW]
 check(w:find("22/64", 1, true) and w:find("heart <dim_grey>1 at L1", 1, true), "open all opens every one")
+check(SAVED.openTalismans.reddragon and SAVED.openTalismans.blackdragon, "and it is kept")
+
+-- In a set, open all and fold all act on that set's talismans and no others.
+M.openAll(false)
+M.data.openTalismans.ogrebroth = true          -- held, but not a dragon
+M.setFocus("dragon")
+M.openAll(true)
+local dragons = M.listed()
+check(#dragons == 6, "the dragon set lists six")
+for _, tkw in ipairs(dragons) do check(M.data.openTalismans[tkw], "open all opened " .. tkw) end
+check(M.data.openTalismans.cloverbox == nil, "and nothing outside the set")
+M.openAll(false)
+for _, tkw in ipairs(dragons) do check(M.data.openTalismans[tkw] == nil, "fold all folded " .. tkw) end
+check(M.data.openTalismans.ogrebroth == true and SAVED.openTalismans.ogrebroth == true, "and left the rest alone")
+M.data.openTalismans.ogrebroth = nil
+M.setFocus("")
+M.openAll(true)
+
 check(w:find("Miscellaneous", 1, true), "the sets are listed")
 check(not w:find("stratospheric", 1, true), "a talisman with nothing held is not in the all view")
 M.setFocus("Dragon")
@@ -507,6 +532,22 @@ local function sideBySide(text, a, b)
     if l:find(a, 1, true) and l:find(b, 1, true) then return true end
   end
   return false
+end
+-- The heading's count, in the singular, and a talisman with every piece.
+do
+  local real = M.data
+  M.data = {
+    sets = {}, setOrder = {}, heldAt = 1, completed = {}, focus = "", shown = true,
+    piecesOpen = false, openTalismans = {},
+    talismans = { box = { name = "a box", set = "misc", pieces = { { kw = "boxlid", level = 1, count = 1 } } } },
+    held = { { kw = "boxlid", count = 1, level = 1, group = "box" } },
+  }
+  check(shown(80):find("Pieces you hold  <dim_grey>1 piece of 1 talisman, 1 with every piece\n", 1, true),
+        "one piece of one talisman, which has every piece: " .. shown(80):sub(1, 200))
+  M.data.held[1].count, M.data.held[1].level = 1, 1
+  M.data.talismans.box.pieces[1].level = 2
+  check(shown(80):find("1 talisman\n", 1, true), "and one without")
+  M.data = real
 end
 check(M.textWidth("<green>██<dim_grey>░░ <reset>2/4") == 8, "a bar's width is its columns, not its bytes")
 for _, focus in ipairs({ "", "dragon" }) do
@@ -898,12 +939,41 @@ STORED = {}
 for k, v in pairs(saved) do STORED[k] = v end
 STORED.focus = 42          -- the wrong type does not come back
 STORED.stray = "x"         -- nor a key nobody saves
+STORED.openTalismans = { reddragon = true }
 AchaeaTalismans = nil
 TRIGGERS = {}
 load()
 M = AchaeaTalismans
 check(#M.data.held == #saved.held and M.data.sets.dragon, "what was saved comes back")
 check(M.data.focus == "" and M.data.stray == nil, "filtered by key and type")
+check(M.data.openTalismans.reddragon == true, "what was open comes back open")
+
+-- A file from before the fold, and one with a fold of the wrong type.
+STORED.piecesOpen, STORED.openTalismans = nil, nil
+AchaeaTalismans = nil
+TRIGGERS = {}
+load()
+M = AchaeaTalismans
+check(M.data.piecesOpen == false and type(M.data.openTalismans) == "table" and next(M.data.openTalismans) == nil,
+      "an older file loads folded")
+STORED.openTalismans = "yes"
+AchaeaTalismans = nil
+TRIGGERS = {}
+load()
+M = AchaeaTalismans
+check(type(M.data.openTalismans) == "table", "a fold of the wrong type is not taken")
+
+-- A recompile with no file over data from an older version: the new keys
+-- are filled in rather than read as nil.
+local stored = STORED
+STORED = nil
+M.data.openTalismans, M.data.piecesOpen = nil, nil
+TRIGGERS = {}
+load()
+M = AchaeaTalismans
+check(type(M.data.openTalismans) == "table" and M.data.piecesOpen == false and #M.data.held > 0,
+      "a recompile fills in what an older version lacked, and keeps the rest")
+STORED = stored
 
 SAVE_FAILS = true
 ECHOED = {}

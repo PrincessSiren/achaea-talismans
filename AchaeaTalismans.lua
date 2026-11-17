@@ -123,6 +123,11 @@ function M.path()
 end
 
 function M.load()
+  -- A recompile keeps M.data, which an older version may have made without
+  -- a key added since; with no file to read, nothing else would add it.
+  for key, value in pairs(fresh()) do
+    if M.data[key] == nil then M.data[key] = value end
+  end
   local path = M.path()
   if not (io.exists and io.exists(path)) then
     S.loaded = "none"
