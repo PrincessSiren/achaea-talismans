@@ -433,12 +433,20 @@ M.setFocus("Dragon")
 w = WINDOWS[M.WINDOW]
 check(M.data.focus == "dragon" and w:find("0/6 done", 1, true), "one set")
 check(w:find("(golddragon)", 1, true) and w:find("needs not read", 1, true), "its talismans, read or not")
+check(not w:find("Sets", 1, true) and not w:find("Miscellaneous", 1, true), "and nothing else: no sets list under them")
+local back = false
+for _, l in ipairs(LINKS) do
+  if l.win == M.WINDOW and l.text:find("[back to sets]", 1, true) and l.code == "AchaeaTalismans.setFocus('')" then back = true end
+end
+check(back, "a link goes back to the sets")
 local foundLink = false
 for _, l in ipairs(LINKS) do
   if l.win == M.WINDOW and l.code == 'AchaeaTalismans.setFocus("misc")' then foundLink = true end
 end
 check(foundLink, "a set's name is a link to it")
 M.setFocus("")
+check(WINDOWS[M.WINDOW]:find("Miscellaneous", 1, true) and not WINDOWS[M.WINDOW]:find("[back to sets]", 1, true),
+      "back, the sets are listed again")
 -- Given an area, openUserWindow re-docks a window that exists, so a click on
 -- a set name would pull a floated window back into the right dock.
 check(DOCKED_TO == nil, "the window is never told where to dock")

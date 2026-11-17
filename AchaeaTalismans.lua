@@ -888,6 +888,8 @@ function M.render(width)
     if set and set.total then add("  " .. fmt(set.done) .. "/" .. fmt(set.total) .. " done") end
     add("  ")
     link("<cyan>[scan set]", "AchaeaTalismans.scan(" .. q(d.focus) .. ")", "send TALISMAN SET and INFO for each of its talismans")
+    add(" ")
+    link("<cyan>[back to sets]", "AchaeaTalismans.setFocus('')", "every talisman you hold pieces of, and every set")
     add("\n")
     list = {}
     if set and set.talismans then
@@ -923,7 +925,11 @@ function M.render(width)
     M.emit(out, M.layout(loose, width, 0))
   end
 
-  if #d.setOrder > 0 then
+  -- One set is shown on its own: the window keeps to its bottom, so a sets
+  -- list drawn under the set's talismans would push them out of sight.
+  if d.focus ~= "" then
+    return out
+  elseif #d.setOrder > 0 then
     add("\n<white>Sets<reset>  <dim_grey>click one to list its talismans\n")
     local nw = 1
     for _, kw in ipairs(d.setOrder) do nw = math.max(nw, #(d.sets[kw].name or kw)) end
