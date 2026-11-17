@@ -9,11 +9,13 @@ and draws each talisman's pieces as bars:
 
 ```
 ◐ a Red Dragon Talisman (reddragon)  0/8 ready, 4%
-  claw             L7    █████░░░░░░░░░░░ 22/64
-  heart            L7    ░░░░░░░░░░░░░░░░ 0/64
+  claw  L7 ███░░░░░░░ 22/64
+  heart L7 ░░░░░░░░░░ 0/64
 ```
 
-Below the talismans, the window lists every set with a mark for each of its
+The window lays itself out in as many columns as fit its width, and again
+when it is resized, so a wide window shows several talismans side by side.
+Below the talismans, it lists every set with a mark for each of its
 talismans: done, started or not started. A set's name is a link to that set.
 A talisman is marked done once `TALISMAN LIST` has been read, which `tals
 scan` sends; a set's talismans are marked once `TALISMAN SET <set>` has been

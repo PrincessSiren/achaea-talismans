@@ -46,6 +46,12 @@ function openUserWindow(name) OPENED = OPENED + 1; WINDOWS[name] = WINDOWS[name]
 function setUserWindowTitle() end
 function clearWindow(name) WINDOWS[name] = "" end
 function hideWindow() HIDDEN = HIDDEN + 1 end
+local COLUMNS, WRAP = nil, nil
+function getColumnCount(name)
+  if COLUMNS == nil then return nil, "window not found" end
+  return COLUMNS
+end
+function setWindowWrap(name, n) if name == AchaeaTalismans.WINDOW then WRAP = n end end
 function getMudletHomeDir() return "/profile" end
 function getEpoch() return CLOCK end
 io.exists = function() return STORED ~= nil or RAISE_ON_LOAD end
@@ -430,6 +436,60 @@ end
 check(foundLink, "a set's name is a link to it")
 M.setFocus("")
 
+-- The layout: as many columns as fit the window, none of them past its edge.
+local function shown(width)
+  local t = {}
+  for _, p in ipairs(M.render(width)) do t[#t + 1] = type(p) == "table" and p[1] or p end
+  return table.concat(t)
+end
+local function lines(text)
+  local out = {}
+  for l in (text .. "\n"):gmatch("(.-)\n") do out[#out + 1] = l end
+  return out
+end
+local function sideBySide(text, a, b)
+  for _, l in ipairs(lines(text)) do
+    if l:find(a, 1, true) and l:find(b, 1, true) then return true end
+  end
+  return false
+end
+check(M.textWidth("<green>██<dim_grey>░░ <reset>2/4") == 8, "a bar's width is its columns, not its bytes")
+for _, width in ipairs({ 60, 120, 200 }) do
+  local widest = 0
+  for _, l in ipairs(lines(shown(width))) do widest = math.max(widest, M.textWidth(l)) end
+  check(widest <= width, "nothing drawn at " .. width .. " columns is wider, got " .. widest)
+end
+check(not sideBySide(shown(60), "(blackdragon)", "(silverdragon)"), "a narrow window has one column of talismans")
+check(sideBySide(shown(60), "Dragon ", "yggdrasil"), "and two of sets")
+check(sideBySide(shown(200), "(blackdragon)", "(silverdragon)"), "a wide one has several of talismans")
+check(#lines(shown(200)) < #lines(shown(60)) / 2, "and is less than half as tall")
+check(not shown(80):find(" \n"), "no line ends in padding")
+check(shown(1):find("22/64", 1, true), "a window narrower than anything is one column")
+check(#M.layout({}, 80, 1) == 0, "nothing to lay out is no columns")
+
+-- The window is measured, given a wrap to match, and laid out again when it
+-- is resized to a different width, once the drag has settled.
+COLUMNS = 61
+M.redraw()
+check(WRAP == 60 and not sideBySide(WINDOWS[M.WINDOW], "(blackdragon)", "(silverdragon)"),
+      "the window is drawn to its measured width, one column off")
+COLUMNS = 201
+raise("sysUserWindowResizeEvent", 1600, 400, "SomeOtherWindow")
+fireTimers()
+check(WRAP == 60, "another window's resize is not ours")
+raise("sysUserWindowResizeEvent", 1500, 400, M.WINDOW)
+raise("sysUserWindowResizeEvent", 1600, 400, M.WINDOW)
+check(count(TIMERS) == 1, "a drag is waited out with one timer")
+fireTimers()
+check(WRAP == 200 and sideBySide(WINDOWS[M.WINDOW], "(blackdragon)", "(silverdragon)"), "and laid out again")
+local drawn = #LINKS
+raise("sysUserWindowResizeEvent", 1600, 401, M.WINDOW)
+fireTimers()
+check(#LINKS == drawn, "a resize to the same width is not redrawn")
+COLUMNS = nil
+M.redraw()
+check(WRAP == M.DEFAULT_WIDTH, "a window that cannot be measured gets the default")
+
 -- Every link's code must compile, since Mudlet runs it as a string.
 for _, l in ipairs(LINKS) do
   check(loadstring(l.code), "link code compiles: " .. l.code)
@@ -564,7 +624,7 @@ check(WINDOWS[M.WINDOW]:find("Pieces of no known talisman", 1, true), "and shown
 game(PROMPT .. "talisman set misc\nName: Miscellaneous\nPartial name: miscellaneous\n" ..
      "Description: Talismans that fit nowhere else.\nTalismans:\na ball of yarn (yarn)\n" .. PROMPT)
 check(M.data.sets.miscellaneous and #M.data.sets.miscellaneous.talismans == 1, "kept under what SET said")
-check(WINDOWS[M.WINDOW]:find("Miscellaneous  <dim_grey>?", 1, true), "no counts shown before SETS gives them")
+check(WINDOWS[M.WINDOW]:find("Miscellaneous%s+<dim_grey>%?"), "no counts shown before SETS gives them")
 game(SETS)
 check(M.data.sets.misc.talismans and M.data.sets.miscellaneous == nil, "SETS takes it over as misc")
 

@@ -53,7 +53,7 @@ COMBINE and SPLIT commands that get it there are still yours to type.
 AchaeaTalismans = AchaeaTalismans or {}
 local M = AchaeaTalismans
 
-M.VERSION = "0.1.1"
+M.VERSION = "0.2.0"
 M.BUILD = M.BUILD or "source"   -- build.py replaces this
 
 -- The name Mudlet knows the package by, which is what its uninstall event
@@ -720,7 +720,11 @@ end
 
 -- -------------------------------------------------------------- the drawing
 
-M.BAR = 16
+M.BAR = 10
+-- Spaces between two columns of the layout.
+M.GAP = 3
+-- The width drawn to when the window cannot be measured.
+M.DEFAULT_WIDTH = 80
 local MARK = { done = "<green>●", started = "<yellow>◐", none = "<dim_grey>○" }
 
 local function bar(have, need)
@@ -742,9 +746,124 @@ local function fmt(n) return string.format("%d", n) end
 -- goes in as a quoted literal rather than pasted between quote marks.
 local function q(s) return string.format("%q", s) end
 
---- What the window shows, as a list of pieces: a string is coloured text,
---- a table is { text, code, hint } and becomes a link that runs the code.
-function M.render()
+--- How many columns a piece of cecho text takes on screen: its colour tags
+--- take none, and a bar or a mark is one column however many bytes it is.
+function M.textWidth(s)
+  s = s:gsub("<[%w_,:]+>", "")
+  local _, n = s:gsub("[^\128-\191]", "")
+  return n
+end
+
+-- A line is a list of pieces, as M.render returns them, with its width in w.
+local function newLine() return { w = 0 } end
+local function put(line, s)
+  line[#line + 1] = s
+  line.w = line.w + M.textWidth(s)
+  return line
+end
+local function putLink(line, text, code, hint)
+  line[#line + 1] = { text, code, hint }
+  line.w = line.w + M.textWidth(text)
+  return line
+end
+local BLANK = newLine()
+
+-- Stack the blocks, in order, into columns no taller than height, with sep
+-- blank lines between two blocks in one column. A block is never split.
+local function stack(blocks, height, sep)
+  local cols, col = {}, nil
+  for _, b in ipairs(blocks) do
+    if col and #col + sep + #b <= height then
+      for _ = 1, sep do col[#col + 1] = BLANK end
+    else
+      col = { w = 0 }
+      cols[#cols + 1] = col
+    end
+    for _, l in ipairs(b) do
+      col[#col + 1] = l
+      if l.w > col.w then col.w = l.w end
+    end
+  end
+  return cols
+end
+
+--- Lay blocks of lines out in columns read top to bottom, as many as fit in
+--- width, each as wide as its widest line. The shortest layout that fits wins;
+--- one wider than the window is a single column.
+function M.layout(blocks, width, sep)
+  local tallest, total = 0, 0
+  for i, b in ipairs(blocks) do
+    if #b > tallest then tallest = #b end
+    total = total + #b + (i > 1 and sep or 0)
+  end
+  for height = tallest, total do
+    local cols = stack(blocks, height, sep)
+    local w = M.GAP * (#cols - 1)
+    for _, col in ipairs(cols) do w = w + col.w end
+    if w <= width then return cols end
+  end
+  return stack(blocks, total, sep)
+end
+
+-- Emit columns row by row into out, padding each cell to its column's width.
+local function emit(out, cols)
+  local rows = 0
+  for _, col in ipairs(cols) do if #col > rows then rows = #col end end
+  for r = 1, rows do
+    local last = 0
+    for c, col in ipairs(cols) do if col[r] and col[r].w > 0 then last = c end end
+    for c = 1, last do
+      local line = cols[c][r] or BLANK
+      out[#out + 1] = "<reset>"
+      for _, piece in ipairs(line) do out[#out + 1] = piece end
+      if c < last then out[#out + 1] = string.rep(" ", cols[c].w - line.w + M.GAP) end
+    end
+    out[#out + 1] = "\n"
+  end
+end
+
+-- One talisman: its name, then a row per piece it needs.
+local function talismanBlock(tkw)
+  local d = M.data
+  local t = d.talismans[tkw]
+  local status = M.status(tkw)
+  local head = put(newLine(), MARK[status] .. " <white>" .. (t and t.name or tkw) .. "<reset> <dim_grey>(" .. tkw .. ")")
+  local block = { head }
+  local p = M.progress(tkw)
+  if status == "done" then
+    put(head, "  <green>done")
+  elseif p then
+    local pct = p.need > 0 and math.floor(100 * p.have / p.need) or 0
+    put(head, "  <reset>" .. fmt(p.ready) .. "/" .. fmt(#p.slots) .. " ready, " .. fmt(pct) .. "%")
+    local lw, vw = 1, 1
+    for _, s in ipairs(p.slots) do
+      s.lvl = (s.count > 1 and (fmt(s.count) .. "x") or "") .. "L" .. fmt(s.level)
+      lw = math.max(lw, math.min(#s.label, 16))
+      vw = math.max(vw, #s.lvl)
+    end
+    for _, s in ipairs(p.slots) do
+      block[#block + 1] = put(newLine(), "  <reset>" .. pad(s.label, lw) .. " <dim_grey>" .. pad(s.lvl, vw) .. " " ..
+        bar(s.have, s.need) .. " <reset>" .. fmt(s.have) .. "/" .. fmt(s.need))
+    end
+  else
+    local line = put(newLine(), "  <dim_grey>needs not read ")
+    putLink(line, "<cyan>[info]", "send(" .. q("talisman info " .. tkw) .. ", false)", "TALISMAN INFO " .. tkw)
+    block[#block + 1] = line
+    for _, row in ipairs(d.held) do
+      if row.group == tkw then
+        block[#block + 1] = put(newLine(), "  <reset>" .. label(tkw, row.kw) .. " <dim_grey>" .. fmt(row.count) ..
+          " at L" .. fmt(row.level) .. " = " .. fmt(row.count * M.units(row.level)))
+      end
+    end
+  end
+  return block
+end
+
+--- What the window shows, laid out for a window this many columns wide, as
+--- a list of pieces: a string is coloured text, a table is { text, code, hint }
+--- and becomes a link that runs the code.
+function M.render(width)
+  width = width or M.DEFAULT_WIDTH
   local out = {}
   local function add(s) out[#out + 1] = s end
   local function link(text, code, hint) out[#out + 1] = { text, code, hint } end
@@ -785,68 +904,63 @@ function M.render()
     if #list == 0 then add("<dim_grey>No pieces read yet. TALISMAN PIECES, or [scan].\n") end
   end
 
-  for _, tkw in ipairs(list) do
-    local t = d.talismans[tkw]
-    local status = M.status(tkw)
-    add("\n" .. MARK[status] .. " <white>" .. (t and t.name or tkw) .. "<reset> <dim_grey>(" .. tkw .. ")")
-    local p = M.progress(tkw)
-    if status == "done" then
-      add("  <green>done\n")
-    elseif p then
-      local pct = p.need > 0 and math.floor(100 * p.have / p.need) or 0
-      add("  <reset>" .. fmt(p.ready) .. "/" .. fmt(#p.slots) .. " ready, " .. fmt(pct) .. "%\n")
-      for _, s in ipairs(p.slots) do
-        local count = s.count > 1 and (fmt(s.count) .. "x") or ""
-        add("  <reset>" .. pad(s.label, 16) .. " <dim_grey>" .. pad(count .. "L" .. fmt(s.level), 5) .. " ")
-        add(bar(s.have, s.need) .. " <reset>" .. fmt(s.have) .. "/" .. fmt(s.need) .. "\n")
-      end
-    else
-      add("  <dim_grey>needs not read ")
-      link("<cyan>[info]", "send(" .. q("talisman info " .. tkw) .. ", false)", "TALISMAN INFO " .. tkw)
-      add("\n")
-      for _, row in ipairs(d.held) do
-        if row.group == tkw then
-          add("  <reset>" .. pad(label(tkw, row.kw), 16) .. " <dim_grey>" .. fmt(row.count) .. " at L" .. fmt(row.level) ..
-              " = " .. fmt(row.count * M.units(row.level)) .. "\n")
-        end
-      end
-    end
+  local blocks = {}
+  for _, tkw in ipairs(list) do blocks[#blocks + 1] = talismanBlock(tkw) end
+  if #blocks > 0 then
+    if d.focus ~= "" then add("\n") end
+    emit(out, M.layout(blocks, width, 1))
   end
 
   local loose = {}
   for _, row in ipairs(d.held) do
-    if not (row.group or M.ownerOf(row.kw)) then loose[#loose + 1] = row end
+    if not (row.group or M.ownerOf(row.kw)) then
+      loose[#loose + 1] = { put(newLine(), "<reset>" .. row.kw .. " <dim_grey>" .. fmt(row.count) .. " at L" ..
+        fmt(row.level) .. " = " .. fmt(row.count * M.units(row.level))) }
+    end
   end
   if d.focus == "" and #loose > 0 then
     add("\n<white>Pieces of no known talisman<reset>\n")
-    for _, row in ipairs(loose) do
-      add("  <reset>" .. pad(row.kw, 24) .. " <dim_grey>" .. fmt(row.count) .. " at L" .. fmt(row.level) ..
-          " = " .. fmt(row.count * M.units(row.level)) .. "\n")
-    end
+    emit(out, M.layout(loose, width, 0))
   end
 
   if #d.setOrder > 0 then
     add("\n<white>Sets<reset>  <dim_grey>click one to list its talismans\n")
+    local nw = 1
+    for _, kw in ipairs(d.setOrder) do nw = math.max(nw, #(d.sets[kw].name or kw)) end
+    local rows = {}
     for _, kw in ipairs(d.setOrder) do
       local set = d.sets[kw]
-      link("<reset>" .. pad(set.name or kw, 14), "AchaeaTalismans.setFocus(" .. q(kw) .. ")", "list the " .. (set.name or kw) .. " set")
+      local line = putLink(newLine(), "<reset>" .. pad(set.name or kw, nw), "AchaeaTalismans.setFocus(" .. q(kw) .. ")",
+        "list the " .. (set.name or kw) .. " set")
       -- A set read by TALISMAN SET alone has no counts yet.
       local counts = set.total and (fmt(set.done or 0) .. "/" .. fmt(set.total)) or "?"
-      local line = " <dim_grey>" .. pad(counts, 6)
+      local marks = " <dim_grey>" .. counts
       if set.talismans then
-        for _, t in ipairs(set.talismans) do line = line .. MARK[M.status(t.kw)] end
+        marks = " <dim_grey>" .. pad(counts, 5) .. " "
+        for _, t in ipairs(set.talismans) do marks = marks .. MARK[M.status(t.kw)] end
       end
-      add(line .. "\n")
+      rows[#rows + 1] = { put(line, marks) }
     end
+    emit(out, M.layout(rows, width, 0))
   else
     add("\n<dim_grey>Sets not read yet. TALISMAN SETS, or [scan].\n")
   end
   return out
 end
 
+--- How many columns the window can show. getColumnCount rounds up where the
+--- text is cut off, so one comes off; nil, or a window not there yet, is the
+--- default.
+function M.width(win)
+  if win and type(getColumnCount) == "function" then
+    local ok, n = pcall(getColumnCount, win)
+    if ok and type(n) == "number" and n > 1 then return math.max(20, math.floor(n) - 1) end
+  end
+  return M.DEFAULT_WIDTH
+end
 --- Draw the pieces M.render made into a window, or the main console for nil.
 function M.draw(win)
-  for _, piece in ipairs(M.render()) do
+  for _, piece in ipairs(M.render(M.width(win))) do
     if type(piece) == "table" then
       if win then cechoLink(win, piece[1], piece[2], piece[3], true)
       else cechoLink(piece[1], piece[2], piece[3], true) end
@@ -870,8 +984,28 @@ end
 function M.redraw()
   if not M.data.shown then return false end
   if not S.opened then M.open() end
+  -- A user window wraps at a fixed column, not at its edge, so a layout as
+  -- wide as the window would otherwise fold where that column falls.
+  S.drawnWidth = M.width(M.WINDOW)
+  pcall(setWindowWrap, M.WINDOW, S.drawnWidth)
   clearWindow(M.WINDOW)
   M.draw(M.WINDOW)
+  return true
+end
+
+-- How long a resize has to settle before the window is laid out again:
+-- dragging an edge raises the event at every step of the drag.
+M.RESIZE_WAIT = 0.25
+
+--- Lay the window out again once it has been resized to a different number
+--- of columns.
+function M.onResize(_, _, _, name)
+  if name ~= M.WINDOW or not M.data.shown then return false end
+  if S.resizeTimer then pcall(killTimer, S.resizeTimer) end
+  S.resizeTimer = tempTimer(M.RESIZE_WAIT, function()
+    S.resizeTimer = nil
+    if M.width(M.WINDOW) ~= S.drawnWidth then M.redraw() end
+  end)
   return true
 end
 
@@ -1096,6 +1230,8 @@ function M.stop()
   S.triggers = {}
   for _, id in ipairs(S.handlers or {}) do pcall(killAnonymousEventHandler, id) end
   S.handlers = {}
+  if S.resizeTimer then pcall(killTimer, S.resizeTimer) end
+  S.resizeTimer = nil
   M.stopScan(true)
   -- Reading state too: M.state lives on the global, through a recompile and
   -- through an uninstall and reinstall in one session, and the new copy
@@ -1129,6 +1265,7 @@ function M.start()
   S.handlers = {
     registerAnonymousEventHandler("sysUninstall", M.onUninstall),
     registerAnonymousEventHandler("sysDataSendRequest", function(_, cmd) M.onSend(cmd) end),
+    registerAnonymousEventHandler("sysUserWindowResizeEvent", function(...) M.onResize(...) end),
   }
   return true
 end
