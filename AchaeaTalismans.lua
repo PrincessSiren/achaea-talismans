@@ -805,8 +805,8 @@ function M.layout(blocks, width, sep)
   return stack(blocks, total, sep)
 end
 
--- Emit columns row by row into out, padding each cell to its column's width.
-local function emit(out, cols)
+--- Emit columns row by row into out, padding each cell to its column's width.
+function M.emit(out, cols)
   local rows = 0
   for _, col in ipairs(cols) do if #col > rows then rows = #col end end
   for r = 1, rows do
@@ -908,7 +908,7 @@ function M.render(width)
   for _, tkw in ipairs(list) do blocks[#blocks + 1] = talismanBlock(tkw) end
   if #blocks > 0 then
     if d.focus ~= "" then add("\n") end
-    emit(out, M.layout(blocks, width, 1))
+    M.emit(out, M.layout(blocks, width, 1))
   end
 
   local loose = {}
@@ -920,7 +920,7 @@ function M.render(width)
   end
   if d.focus == "" and #loose > 0 then
     add("\n<white>Pieces of no known talisman<reset>\n")
-    emit(out, M.layout(loose, width, 0))
+    M.emit(out, M.layout(loose, width, 0))
   end
 
   if #d.setOrder > 0 then
@@ -941,7 +941,7 @@ function M.render(width)
       end
       rows[#rows + 1] = { put(line, marks) }
     end
-    emit(out, M.layout(rows, width, 0))
+    M.emit(out, M.layout(rows, width, 0))
   else
     add("\n<dim_grey>Sets not read yet. TALISMAN SETS, or [scan].\n")
   end

@@ -467,6 +467,30 @@ check(not shown(80):find(" \n"), "no line ends in padding")
 check(shown(1):find("22/64", 1, true), "a window narrower than anything is one column")
 check(#M.layout({}, 80, 1) == 0, "nothing to lay out is no columns")
 
+-- Exact layouts, so a gap, a padding or a fit off by one shows. A at two
+-- lines, B and C at one; with sep 1 they stack A | B | C at height 2 (4 + 6
+-- + 2 wide, plus two gaps of 3: 18), or A | B, C at height 3 (4 + 6 + 3: 13).
+local function L(s) return { s, w = M.textWidth(s) } end
+local ABC = { { L("aaaa"), L("aa") }, { L("bbbbbb") }, { L("cc") } }
+local function laid(width, sep)
+  local out = {}
+  M.emit(out, M.layout(ABC, width, sep))
+  return (table.concat(out):gsub("<[%w_,:]+>", ""))
+end
+check(laid(18, 1) == "aaaa   bbbbbb   cc\naa\n", "a layout exactly as wide as the window fits: " .. laid(18, 1))
+check(laid(17, 1) == "aaaa   bbbbbb\naa\n       cc\n", "one column less, and C goes under B: " .. laid(17, 1))
+check(laid(17, 0) == "aaaa   bbbbbb\naa     cc\n", "with no sep, C sits right under B: " .. laid(17, 0))
+check(laid(9, 1) == "aaaa\naa\n\nbbbbbb\n\ncc\n", "a window narrower than two columns is one: " .. laid(9, 1))
+check(#M.layout({ { L(string.rep("x", 50)) }, { L("y") } }, 20, 0) == 1, "a block wider than the window is one column")
+
+-- The README's example rows, as drawn: labels padded to the longest in the
+-- talisman (leather, of the eight), a 10-cell bar, 22 of 64 filling three.
+local plain = shown(80):gsub("<[%w_,:]+>", "")
+check(plain:find("\n  claw    L7 ███░░░░░░░ 22/64", 1, true) and plain:find("\n  heart   L7 ░░░░░░░░░░ 0/64", 1, true),
+      "the README's rows are what is drawn")
+local readme = assert(io.open(HERE .. "/README.md")):read("*a")
+check(readme:find("  claw    L7 ███░░░░░░░ 22/64", 1, true), "and the README shows them")
+
 -- The window is measured, given a wrap to match, and laid out again when it
 -- is resized to a different width, once the drag has settled.
 COLUMNS = 61

@@ -9,8 +9,8 @@ and draws each talisman's pieces as bars:
 
 ```
 ◐ a Red Dragon Talisman (reddragon)  0/8 ready, 4%
-  claw  L7 ███░░░░░░░ 22/64
-  heart L7 ░░░░░░░░░░ 0/64
+  claw    L7 ███░░░░░░░ 22/64
+  heart   L7 ░░░░░░░░░░ 0/64
 ```
 
 The window lays itself out in as many columns as fit its width, and again
