@@ -53,7 +53,7 @@ COMBINE and SPLIT commands that get it there are still yours to type.
 AchaeaTalismans = AchaeaTalismans or {}
 local M = AchaeaTalismans
 
-M.VERSION = "0.1.0"
+M.VERSION = "0.1.1"
 M.BUILD = M.BUILD or "source"   -- build.py replaces this
 
 -- The name Mudlet knows the package by, which is what its uninstall event
@@ -196,7 +196,7 @@ M.MORE_OPEN = "^%[Type MORE if you wish to continue reading"
 M.MORE_CLOSE = "^%[File continued via MORE%]"
 -- A paged table nobody went on reading is let go after this long, so that a
 -- later MORE for something else does not feed that something to it.
-M.PAUSE_MAX = 120
+M.PAUSE_MAX = 300
 
 -- B 1   a Black Dragon's heart            1     Dragon     blackdragonheart
 -- The name column is cut at 33 characters, so the name is taken as whatever
@@ -235,15 +235,22 @@ end
 --   "drop"  this was not the output it looked like
 local READ = {}
 
---- Whether a row's last field starts in its header's Keyword column and ends
---- the line. In every row of every table captured it does, and a tell or any
---- other line that arrives mid-table almost never will, so a row is only
---- taken if it does.
+-- How far past its header's Keyword column a row's keyword may start: room
+-- for a set name a few characters wider than its column, and no more.
+M.KW_SLACK = 4
+
+--- Whether a row's last field is a keyword where the header puts keywords.
+--- In every row of every table captured, the keyword is lower-case letters
+--- and digits and starts exactly in the Keyword column. A few columns later
+--- is allowed, for a set name wider than its column that pushed it right.
+--- A tell, a channel line or a timing tag that arrives mid-table almost never
+--- ends in such a word at such a place, so it is not taken as a row.
 local function inColumn(cap, l, kw)
   local col = cap.kwCol
-  return col ~= nil and kw ~= nil
-    and l:sub(col - 1, col - 1) == " "
-    and l:sub(col) == kw
+  if not (col and kw and kw:find("^[%l%d]+$")) then return false end
+  local start = #l - #kw + 1
+  return start >= col and start <= col + M.KW_SLACK
+    and l:sub(start - 1, start - 1) == " "
 end
 
 local function tableReader(onRow)
@@ -432,8 +439,9 @@ COMMIT.tpieces = function(cap)
   -- Nothing read so far says whose pieces these are, but the command that
   -- was typed for them does.
   local asked = S.asked
-  if (owner == nil or mixed) and asked and M.now() - asked.at < M.ASKED_FOR then
-    owner, mixed = asked.kw, false
+  local named = asked and M.now() - asked.at < M.ASKED_FOR and M.resolveTalisman(asked.kw)
+  if (owner == nil or mixed) and named then
+    owner, mixed = named, false
     for _, row in ipairs(cap.rows) do row.group = row.group or owner end
   end
   M.data.heldAt = os.time()
@@ -579,6 +587,11 @@ function M.feed(text)
       cap.paused, cap.pausedAt = true, M.now()
       -- Answered only for a listing the scan asked for and is waiting on.
       if cap.fromScan and S.scan then send("more", false) end
+    elseif S.between and S.scan and S.scan.step then
+      -- Straight after one of the scan's tables closed, with nothing but
+      -- blank lines since, and the scan still waiting on the same step: the
+      -- break falls between two tables of its listing, as LIST's are.
+      send("more", false)
     end
     return
   end
@@ -601,6 +614,8 @@ function M.feed(text)
     S.paging = false
     if cap and cap.paused then S.cap, cap = nil, nil end
   end
+  -- Between two of the scan's tables only until something else is printed.
+  if l ~= "" then S.between = false end
   -- In LIST the sets table follows the done talismans after one blank line.
   -- Any other line between, a prompt above all, means they were not one
   -- listing.
@@ -616,7 +631,16 @@ function M.feed(text)
     local verdict = READ[cap.kind](cap, l)
     if verdict == nil then return end
     S.cap = nil
-    if verdict == "done" then M.commit(cap); return end
+    if verdict == "done" then
+      local step = S.scan and S.scan.step
+      M.commit(cap)
+      -- A scan table closed, and the scan has not moved on: more of its
+      -- listing may follow, after a page break.
+      if cap.fromScan and cap.rules and step and S.scan and S.scan.step == step then
+        S.between = true
+      end
+      return
+    end
     if verdict == "pass" then M.commit(cap) end
     -- "pass" and "drop" both leave this line to be looked at afresh.
   end
@@ -956,8 +980,36 @@ M.ASKED_FOR = 10
 --- Every command sent, whoever sent it: kept only when it asks for one
 --- talisman's pieces, since that output does not say whose they are.
 function M.onSend(cmd)
-  local kw = type(cmd) == "string" and cmd:lower():match("^%s*talisman%s+pieces%s+(%S+)%s*$")
-  if kw then S.asked = { kw = kw, at = M.now() } end
+  if type(cmd) ~= "string" then return end
+  -- Either word may be cut short to three letters or more, in case the game
+  -- takes that (`tal pie`); the full words are what is captured. Only real
+  -- beginnings of the two words count, so `talk pie bob` does not.
+  local a, b, kw = cmd:lower():match("^%s*(%a+)%s+(%a+)%s+(%S+)%s*$")
+  if not a or #a < 3 or #b < 3 then return end
+  if ("talisman"):sub(1, #a) ~= a or ("pieces"):sub(1, #b) ~= b then return end
+  S.asked = { kw = kw, at = M.now() }
+end
+
+--- A talisman keyword as typed, which may be cut short (`silver` for
+--- `silverdragon`), resolved against the keywords already known: itself if
+--- known, else the one known keyword it starts, else itself as typed when it
+--- starts none. Nil when it could be more than one.
+function M.resolveTalisman(kw)
+  local known = {}
+  for tkw in pairs(M.data.talismans) do known[tkw] = true end
+  for _, row in ipairs(M.data.held) do if row.group then known[row.group] = true end end
+  for _, set in pairs(M.data.sets) do
+    for _, t in ipairs(set.talismans or {}) do known[t.kw] = true end
+  end
+  if known[kw] then return kw end
+  local found
+  for tkw in pairs(known) do
+    if tkw:sub(1, #kw) == kw then
+      if found then return nil end
+      found = tkw
+    end
+  end
+  return found or kw
 end
 
 function M.setFocus(kw)
@@ -966,23 +1018,25 @@ function M.setFocus(kw)
   return M.data.focus
 end
 
--- The first words build.py's aliases answer to. Anything else after `tals`
--- would otherwise go to the game as a command.
-M.WORDS = { show = true, hide = true, all = true, set = true, scan = true, stop = true, diag = true }
+-- What follows `tals ` in each of build.py's aliases, as Lua patterns: the
+-- same forms, and case-sensitive like them. The harness holds the two
+-- together. Anything else after `tals` would otherwise go to the game.
+M.FORMS = {
+  "^show$", "^hide$", "^all$", "^set%s+%S+$", "^scan$", "^scan%s+%S+$", "^stop$", "^diag$",
+}
 
 --- `tals <anything>`: Mudlet runs every alias that matches, so this fires
 --- alongside the real ones too, and says something only when none of them did.
 function M.unknown(rest)
-  local word, arg = (rest or ""):match("^(%S+)%s*(.-)%s*$")
-  word = word and word:lower()
-  if word == "set" and arg == "" then
+  rest = rest or ""
+  for _, form in ipairs(M.FORMS) do
+    if rest:find(form) then return true end
+  end
+  if rest:find("^set%s*$") then
     log("tals set <set>: which set? `tals` lists the commands")
-    return false
+  else
+    log("`tals " .. rest .. "` is not a command here (they are lower case); `tals` lists them")
   end
-  if word and M.WORDS[word] and (word == "set" or word == "scan" or arg == "") then
-    return true
-  end
-  log("`tals " .. (rest or "") .. "` is not a command here; `tals` lists them")
   return false
 end
 
@@ -1043,7 +1097,10 @@ function M.stop()
   for _, id in ipairs(S.handlers or {}) do pcall(killAnonymousEventHandler, id) end
   S.handlers = {}
   M.stopScan(true)
-  S.cap = nil
+  -- Reading state too: M.state lives on the global, through a recompile and
+  -- through an uninstall and reinstall in one session, and the new copy
+  -- should not pick up a listing half read by the old.
+  S.cap, S.paging, S.listed, S.asked, S.between = nil, false, nil, nil, false
   return true
 end
 
@@ -1055,6 +1112,9 @@ function M.onUninstall(_, name)
   if name ~= M.PACKAGE then return false end
   M.stop()
   pcall(hideWindow, M.WINDOW)
+  -- So a reinstall in the same session opens it again. Not in M.stop, which
+  -- every recompile runs: that would reopen a window the player had closed.
+  S.opened = false
   return true
 end
 
