@@ -949,10 +949,10 @@ function M.render(width)
 end
 
 --- How many columns the window can show. getColumnCount rounds up where the
---- text is cut off, so one comes off; nil, or a window not there yet, is the
---- default.
+--- text is cut off, so one comes off. The main console (nil) is drawn at the
+--- default, and so is a window not there yet, for which getColumnCount raises.
 function M.width(win)
-  if win and type(getColumnCount) == "function" then
+  if win then
     local ok, n = pcall(getColumnCount, win)
     if ok and type(n) == "number" and n > 1 then return math.max(20, math.floor(n) - 1) end
   end

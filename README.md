@@ -38,7 +38,7 @@ read. Until then, the window says `needs not read` where the bars would be.
 
 Build the package (see [Building](#building)), then drag
 `AchaeaTalismans.mpackage` into Mudlet, or install it from **Package
-Manager**. It is written for Mudlet 4.22 and later.
+Manager**. It is written for Mudlet 5.0 and later.
 
 The window opens docked on the right whenever the profile loads, unless you
 closed it with `tals hide`. Closing it with its own close button keeps it

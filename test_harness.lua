@@ -48,7 +48,7 @@ function clearWindow(name) WINDOWS[name] = "" end
 function hideWindow() HIDDEN = HIDDEN + 1 end
 local COLUMNS, WRAP = nil, nil
 function getColumnCount(name)
-  if COLUMNS == nil then return nil, "window not found" end
+  if COLUMNS == nil then error("getColumnCount: bad argument #1 type (window name \"" .. tostring(name) .. "\" not found)") end
   return COLUMNS
 end
 function setWindowWrap(name, n) if name == AchaeaTalismans.WINDOW then WRAP = n end end
