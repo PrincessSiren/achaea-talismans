@@ -42,7 +42,11 @@ function cechoLink(...)
 end
 function send(cmd) SENT[#SENT + 1] = cmd end
 local OPENED, HIDDEN = 0, 0
-function openUserWindow(name) OPENED = OPENED + 1; WINDOWS[name] = WINDOWS[name] or "" end
+local DOCKED_TO = nil
+function openUserWindow(name, _, _, area)
+  OPENED = OPENED + 1; WINDOWS[name] = WINDOWS[name] or ""
+  if area ~= nil then DOCKED_TO = area end
+end
 function setUserWindowTitle() end
 function clearWindow(name) WINDOWS[name] = "" end
 function hideWindow() HIDDEN = HIDDEN + 1 end
@@ -435,6 +439,9 @@ for _, l in ipairs(LINKS) do
 end
 check(foundLink, "a set's name is a link to it")
 M.setFocus("")
+-- Given an area, openUserWindow re-docks a window that exists, so a click on
+-- a set name would pull a floated window back into the right dock.
+check(DOCKED_TO == nil, "the window is never told where to dock")
 
 -- The layout: as many columns as fit the window, none of them past its edge.
 local function shown(width)

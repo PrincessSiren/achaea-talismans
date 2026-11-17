@@ -970,9 +970,13 @@ function M.draw(win)
   end
 end
 
---- Open the window, or show it again if it was closed.
+--- Open the window, or show it again if it was closed. No dock area is
+--- given: Mudlet docks a new window on the right by itself, and given one it
+--- re-docks a window that already exists, every time, squeezing it into the
+--- right dock even when the player had floated or sized it elsewhere, and
+--- every click on a set name comes through here.
 function M.open()
-  openUserWindow(M.WINDOW, true, true, "right")
+  openUserWindow(M.WINDOW, true, true)
   pcall(setUserWindowTitle, M.WINDOW, "Talismans")
   S.opened = true
 end
