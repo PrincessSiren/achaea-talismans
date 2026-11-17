@@ -8,16 +8,27 @@ It reads what the game prints for `TALISMAN PIECES`, `TALISMAN INFO`,
 and draws each talisman's pieces as bars:
 
 ```
-◐ a Red Dragon Talisman (reddragon)  0/8 ready, 4%
-  claw             L7    █████░░░░░░░░░░░ 22/64
-  heart            L7    ░░░░░░░░░░░░░░░░ 0/64
+▾ ◐ a Red Dragon Talisman (reddragon)  0/8 ready, 4%
+    claw    L7 ███░░░░░░░ 22/64
+    heart   L7 ░░░░░░░░░░ 0/64
 ```
 
-Below the talismans, the window lists every set with a mark for each of its
-talismans: done, started or not started. A set's name is a link to that set.
-A talisman is marked done once `TALISMAN LIST` has been read, which `tals
-scan` sends; a set's talismans are marked once `TALISMAN SET <set>` has been
-read, which `tals scan <set>` sends.
+The pieces you hold are folded to one line, `▸ Pieces you hold`, with a
+count; clicking it lists them, and clicking again folds them. Listed, each
+talisman is folded in turn to its name and how far along it is, and
+clicking a name shows its pieces, as above. `[open all]` and `[fold all]`
+do every talisman at once. The window remembers what is open.
+
+Under the pieces, the window lists every set with a mark for each of its
+talismans: done, started or not started. A set's name is a link that shows
+that set's talismans on their own, without the sets list; `[back to sets]`
+returns to everything. A talisman is marked done once `TALISMAN LIST` has
+been read, which `tals scan` sends; a set's talismans are marked once
+`TALISMAN SET <set>` has been read, which `tals scan <set>` sends.
+
+The window lays itself out in as many columns as fit its width, and again
+when it is resized, so a wide window shows several talismans or sets side
+by side.
 
 ## How pieces are counted
 
@@ -36,7 +47,7 @@ read. Until then, the window says `needs not read` where the bars would be.
 
 Build the package (see [Building](#building)), then drag
 `AchaeaTalismans.mpackage` into Mudlet, or install it from **Package
-Manager**. It is written for Mudlet 4.22 and later.
+Manager**. It is written for Mudlet 5.0 and later.
 
 The window opens docked on the right whenever the profile loads, unless you
 closed it with `tals hide`. Closing it with its own close button keeps it

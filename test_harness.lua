@@ -42,10 +42,20 @@ function cechoLink(...)
 end
 function send(cmd) SENT[#SENT + 1] = cmd end
 local OPENED, HIDDEN = 0, 0
-function openUserWindow(name) OPENED = OPENED + 1; WINDOWS[name] = WINDOWS[name] or "" end
+local DOCKED_TO = nil
+function openUserWindow(name, _, _, area)
+  OPENED = OPENED + 1; WINDOWS[name] = WINDOWS[name] or ""
+  if area ~= nil then DOCKED_TO = area end
+end
 function setUserWindowTitle() end
 function clearWindow(name) WINDOWS[name] = "" end
 function hideWindow() HIDDEN = HIDDEN + 1 end
+local COLUMNS, WRAP = nil, nil
+function getColumnCount(name)
+  if COLUMNS == nil then error("getColumnCount: bad argument #1 type (window name \"" .. tostring(name) .. "\" not found)") end
+  return COLUMNS
+end
+function setWindowWrap(name, n) if name == AchaeaTalismans.WINDOW then WRAP = n end end
 function getMudletHomeDir() return "/profile" end
 function getEpoch() return CLOCK end
 io.exists = function() return STORED ~= nil or RAISE_ON_LOAD end
@@ -55,10 +65,17 @@ table.load = function(_, into)
 end
 -- Mudlet's table.save returns nil and a message when it cannot open the
 -- file; it does not raise. The stub does the same.
+-- A deep copy, as the file would be: a table shared with M.data would show
+-- a change that was never saved.
+local function deepCopy(v)
+  if type(v) ~= "table" then return v end
+  local out = {}
+  for key, value in pairs(v) do out[key] = deepCopy(value) end
+  return out
+end
 table.save = function(_, t)
   if SAVE_FAILS then return nil, "Permission denied" end
-  SAVED = {}
-  for key, value in pairs(t) do SAVED[key] = value end
+  SAVED = deepCopy(t)
 end
 os.rename = function() return true end
 local seq = 0
@@ -335,6 +352,18 @@ check(#M.heldTalismans() == 9, "nine talismans held, got " .. #M.heldTalismans()
 
 -- Before INFO, a talisman shows only what is held.
 check(M.progress("reddragon") == nil, "no progress without INFO")
+-- The pieces held are folded to one line until asked for.
+check(M.data.piecesOpen == false and not WINDOWS[M.WINDOW]:find("needs not read", 1, true),
+      "the pieces held are folded by default")
+check(WINDOWS[M.WINDOW]:find("▸ <white>Pieces you hold", 1, true) and WINDOWS[M.WINDOW]:find(" of 9 talismans", 1, true),
+      "to a line that says how many")
+local fold = false
+for _, l in ipairs(LINKS) do
+  if l.win == M.WINDOW and l.code == "AchaeaTalismans.togglePieces()" then fold = true end
+end
+check(fold, "which is a link")
+check(M.togglePieces() == true and SAVED.piecesOpen == true, "a click lists them, and it is kept")
+check(WINDOWS[M.WINDOW]:find("▾ <white>Pieces you hold", 1, true), "the arrow turns")
 check(WINDOWS[M.WINDOW]:find("needs not read", 1, true), "the window says what is missing")
 
 -- ------------------------------------------------------------------ INFO
@@ -416,19 +445,185 @@ check(#M.data.held == before and M.heldUnits("silverdragonclaw") == 8, "and back
 M.setFocus("")
 local w = WINDOWS[M.WINDOW]
 check(w:find("a Red Dragon Talisman", 1, true) and w:find("0/8 ready, 4%", 1, true), "the red dragon's line")
-check(w:find("22/64", 1, true), "the claw's count")
+-- Each talisman is folded to its name until clicked.
+check(not w:find("22/64", 1, true) and w:find("▸ <yellow>◐ <white>a Red Dragon Talisman", 1, true), "folded to its name")
+check(w:find("(blackdragon)  <dim_grey>needs not read", 1, true), "what is missing shows folded, too")
+check(w:find("9 talismans  <cyan>[open all] <cyan>[fold all]\n", 1, true), "open all and fold all sit on the heading")
+local toggle, all = false, false
+for _, l in ipairs(LINKS) do
+  if l.win == M.WINDOW and l.code == 'AchaeaTalismans.toggleTalisman("reddragon")' then toggle = true end
+  if l.win == M.WINDOW and l.code == "AchaeaTalismans.openAll(true)" then all = true end
+end
+check(toggle and all, "its name is a link that opens it, and there is one for all of them")
+check(M.toggleTalisman("reddragon") == true and SAVED.openTalismans.reddragon == true, "a click opens one, and it is kept")
+w = WINDOWS[M.WINDOW]
+check(w:find("▾ <yellow>◐ <white>a Red Dragon Talisman", 1, true) and w:find("22/64", 1, true), "the claw's count")
+check(not w:find("heart <dim_grey>1 at L1", 1, true), "the others stay folded")
+check(M.toggleTalisman("reddragon") == false and SAVED.openTalismans.reddragon == nil, "a second click folds it")
+M.openAll(true)
+w = WINDOWS[M.WINDOW]
+check(w:find("22/64", 1, true) and w:find("heart <dim_grey>1 at L1", 1, true), "open all opens every one")
+check(SAVED.openTalismans.reddragon and SAVED.openTalismans.blackdragon, "and it is kept")
+
+-- In a set, open all and fold all act on that set's talismans and no others.
+M.openAll(false)
+M.data.openTalismans.ogrebroth = true          -- held, but not a dragon
+M.setFocus("dragon")
+M.openAll(true)
+local dragons = M.listed()
+check(#dragons == 6, "the dragon set lists six")
+for _, tkw in ipairs(dragons) do check(M.data.openTalismans[tkw], "open all opened " .. tkw) end
+check(M.data.openTalismans.cloverbox == nil, "and nothing outside the set")
+M.openAll(false)
+for _, tkw in ipairs(dragons) do check(M.data.openTalismans[tkw] == nil, "fold all folded " .. tkw) end
+check(M.data.openTalismans.ogrebroth == true and SAVED.openTalismans.ogrebroth == true, "and left the rest alone")
+M.data.openTalismans.ogrebroth = nil
+M.setFocus("")
+M.openAll(true)
+
 check(w:find("Miscellaneous", 1, true), "the sets are listed")
 check(not w:find("stratospheric", 1, true), "a talisman with nothing held is not in the all view")
 M.setFocus("Dragon")
 w = WINDOWS[M.WINDOW]
 check(M.data.focus == "dragon" and w:find("0/6 done", 1, true), "one set")
 check(w:find("(golddragon)", 1, true) and w:find("needs not read", 1, true), "its talismans, read or not")
+check(not w:find("Sets", 1, true) and not w:find("Miscellaneous", 1, true), "and nothing else: no sets list under them")
+local back = false
+for _, l in ipairs(LINKS) do
+  if l.win == M.WINDOW and l.text:find("[back to sets]", 1, true) and l.code == "AchaeaTalismans.setFocus('')" then back = true end
+end
+check(back, "a link goes back to the sets")
 local foundLink = false
 for _, l in ipairs(LINKS) do
   if l.win == M.WINDOW and l.code == 'AchaeaTalismans.setFocus("misc")' then foundLink = true end
 end
 check(foundLink, "a set's name is a link to it")
 M.setFocus("")
+check(WINDOWS[M.WINDOW]:find("Miscellaneous", 1, true) and not WINDOWS[M.WINDOW]:find("[back to sets]", 1, true),
+      "back, the sets are listed again")
+-- Given an area, openUserWindow re-docks a window that exists, so a click on
+-- a set name would pull a floated window back into the right dock.
+check(DOCKED_TO == nil, "the window is never told where to dock")
+
+-- The layout: as many columns as fit the window, none of them past its edge.
+local function shown(width)
+  local t = {}
+  for _, p in ipairs(M.render(width)) do t[#t + 1] = type(p) == "table" and p[1] or p end
+  return table.concat(t)
+end
+local function lines(text)
+  local out = {}
+  for l in (text .. "\n"):gmatch("(.-)\n") do out[#out + 1] = l end
+  return out
+end
+-- The most open talismans (▾, past the pieces heading's own) on one line.
+local function across(text)
+  local most = 0
+  for _, l in ipairs(lines(text)) do
+    if not l:find("Pieces you hold", 1, true) then
+      local _, n = l:gsub("▾ ", "")
+      most = math.max(most, n)
+    end
+  end
+  return most
+end
+local function sideBySide(text, a, b)
+  for _, l in ipairs(lines(text)) do
+    if l:find(a, 1, true) and l:find(b, 1, true) then return true end
+  end
+  return false
+end
+-- The heading's count, in the singular, and a talisman with every piece.
+do
+  local real = M.data
+  M.data = {
+    sets = {}, setOrder = {}, heldAt = 1, completed = {}, focus = "", shown = true,
+    piecesOpen = false, openTalismans = {},
+    talismans = { box = { name = "a box", set = "misc", pieces = { { kw = "boxlid", level = 1, count = 1 } } } },
+    held = { { kw = "boxlid", count = 1, level = 1, group = "box" } },
+  }
+  check(shown(80):find("Pieces you hold  <dim_grey>1 piece of 1 talisman, 1 with every piece\n", 1, true),
+        "one piece of one talisman, which has every piece: " .. shown(80):sub(1, 200))
+  M.data.held[1].count, M.data.held[1].level = 1, 1
+  M.data.talismans.box.pieces[1].level = 2
+  check(shown(80):find("1 talisman\n", 1, true), "and one without")
+  M.data = real
+end
+check(M.textWidth("<green>██<dim_grey>░░ <reset>2/4") == 8, "a bar's width is its columns, not its bytes")
+for _, focus in ipairs({ "", "dragon" }) do
+  M.data.focus = focus
+  for _, width in ipairs({ 60, 120, 200 }) do
+    local widest = 0
+    for _, l in ipairs(lines(shown(width))) do widest = math.max(widest, M.textWidth(l)) end
+    check(widest <= width, "nothing drawn at " .. width .. " columns is wider, got " .. widest .. " in " .. focus)
+  end
+end
+check(shown(120):find("[back to sets] <cyan>[open all]", 1, true), "a set's heading spaces its links")
+M.data.focus = ""
+check(across(shown(60)) == 1, "a narrow window has one column of talismans")
+check(sideBySide(shown(60), "Dragon ", "yggdrasil"), "and two of sets")
+check(across(shown(200)) >= 3, "a wide one has several of talismans, got " .. across(shown(200)))
+check(not shown(200):find("\n\n\n", 1, true) and not shown(60):find("\n\n\n", 1, true),
+      "an open talisman's blank line is never two, nor at a column's foot")
+check(#lines(shown(200)) < #lines(shown(60)) / 2, "and is less than half as tall")
+check(not shown(80):find(" \n"), "no line ends in padding")
+check(shown(1):find("22/64", 1, true), "a window narrower than anything is one column")
+check(#M.layout({}, 80, 1) == 0, "nothing to lay out is no columns")
+
+-- Exact layouts, so a gap, a padding or a fit off by one shows. A at two
+-- lines, B and C at one; with sep 1 they stack A | B | C at height 2 (4 + 6
+-- + 2 wide, plus two gaps of 3: 18), or A | B, C at height 3 (4 + 6 + 3: 13).
+local function L(s) return { s, w = M.textWidth(s) } end
+local ABC = { { L("aaaa"), L("aa") }, { L("bbbbbb") }, { L("cc") } }
+local function laid(width, sep)
+  local out = {}
+  M.emit(out, M.layout(ABC, width, sep))
+  return (table.concat(out):gsub("<[%w_,:]+>", ""))
+end
+check(laid(18, 1) == "aaaa   bbbbbb   cc\naa\n", "a layout exactly as wide as the window fits: " .. laid(18, 1))
+check(laid(17, 1) == "aaaa   bbbbbb\naa\n       cc\n", "one column less, and C goes under B: " .. laid(17, 1))
+check(laid(17, 0) == "aaaa   bbbbbb\naa     cc\n", "with no sep, C sits right under B: " .. laid(17, 0))
+check(laid(9, 1) == "aaaa\naa\n\nbbbbbb\n\ncc\n", "a window narrower than two columns is one: " .. laid(9, 1))
+check(#M.layout({ { L(string.rep("x", 50)) }, { L("y") } }, 20, 0) == 1, "a block wider than the window is one column")
+do
+  -- A block's own `after` puts blank lines under it, between it and the next
+  -- block in its column only.
+  local out = {}
+  M.emit(out, M.layout({ { L("aaaa"), L("aa"), after = 1 }, { L("bbbbbb") }, { L("cc") } }, 9, 0))
+  local got = (table.concat(out):gsub("<[%w_,:]+>", ""))
+  check(got == "aaaa\naa\n\nbbbbbb\ncc\n", "an open block's blank line, and none after the others: " .. got)
+end
+
+-- The README's example rows, as drawn: labels padded to the longest in the
+-- talisman (leather, of the eight), a 10-cell bar, 22 of 64 filling three.
+local plain = shown(80):gsub("<[%w_,:]+>", "")
+check(plain:find("\n    claw    L7 ███░░░░░░░ 22/64", 1, true) and plain:find("\n    heart   L7 ░░░░░░░░░░ 0/64", 1, true),
+      "the README's rows are what is drawn")
+local readme = assert(io.open(HERE .. "/README.md")):read("*a")
+check(readme:find("    claw    L7 ███░░░░░░░ 22/64", 1, true), "and the README shows them")
+
+-- The window is measured, given a wrap to match, and laid out again when it
+-- is resized to a different width, once the drag has settled.
+COLUMNS = 61
+M.redraw()
+check(WRAP == 60 and across(WINDOWS[M.WINDOW]) == 1,
+      "the window is drawn to its measured width, one column off")
+COLUMNS = 201
+raise("sysUserWindowResizeEvent", 1600, 400, "SomeOtherWindow")
+fireTimers()
+check(WRAP == 60, "another window's resize is not ours")
+raise("sysUserWindowResizeEvent", 1500, 400, M.WINDOW)
+raise("sysUserWindowResizeEvent", 1600, 400, M.WINDOW)
+check(count(TIMERS) == 1, "a drag is waited out with one timer")
+fireTimers()
+check(WRAP == 200 and across(WINDOWS[M.WINDOW]) >= 3, "and laid out again")
+local drawn = #LINKS
+raise("sysUserWindowResizeEvent", 1600, 401, M.WINDOW)
+fireTimers()
+check(#LINKS == drawn, "a resize to the same width is not redrawn")
+COLUMNS = nil
+M.redraw()
+check(WRAP == M.DEFAULT_WIDTH, "a window that cannot be measured gets the default")
 
 -- Every link's code must compile, since Mudlet runs it as a string.
 for _, l in ipairs(LINKS) do
@@ -557,6 +752,10 @@ CLOCK = CLOCK + M.ASKED_FOR + 1
 M.data.held = {}
 game(TPIECES_SILVER)
 check(#M.heldTalismans() == 0 and #M.data.held == 5, "too late to tell whose, kept anyway")
+check(WINDOWS[M.WINDOW]:find("Pieces you hold  <dim_grey>6 pieces\n", 1, true) and
+      not WINDOWS[M.WINDOW]:find("Pieces of no known talisman", 1, true),
+      "folded, with no talisman to count, got: " .. WINDOWS[M.WINDOW]:sub(1, 300))
+M.togglePieces()
 check(WINDOWS[M.WINDOW]:find("Pieces of no known talisman", 1, true), "and shown")
 
 -- TALISMAN SET before SETS: stored under the keyword SET printed, then taken
@@ -564,7 +763,7 @@ check(WINDOWS[M.WINDOW]:find("Pieces of no known talisman", 1, true), "and shown
 game(PROMPT .. "talisman set misc\nName: Miscellaneous\nPartial name: miscellaneous\n" ..
      "Description: Talismans that fit nowhere else.\nTalismans:\na ball of yarn (yarn)\n" .. PROMPT)
 check(M.data.sets.miscellaneous and #M.data.sets.miscellaneous.talismans == 1, "kept under what SET said")
-check(WINDOWS[M.WINDOW]:find("Miscellaneous  <dim_grey>?", 1, true), "no counts shown before SETS gives them")
+check(WINDOWS[M.WINDOW]:find("Miscellaneous%s+<dim_grey>%?"), "no counts shown before SETS gives them")
 game(SETS)
 check(M.data.sets.misc.talismans and M.data.sets.miscellaneous == nil, "SETS takes it over as misc")
 
@@ -740,12 +939,41 @@ STORED = {}
 for k, v in pairs(saved) do STORED[k] = v end
 STORED.focus = 42          -- the wrong type does not come back
 STORED.stray = "x"         -- nor a key nobody saves
+STORED.openTalismans = { reddragon = true }
 AchaeaTalismans = nil
 TRIGGERS = {}
 load()
 M = AchaeaTalismans
 check(#M.data.held == #saved.held and M.data.sets.dragon, "what was saved comes back")
 check(M.data.focus == "" and M.data.stray == nil, "filtered by key and type")
+check(M.data.openTalismans.reddragon == true, "what was open comes back open")
+
+-- A file from before the fold, and one with a fold of the wrong type.
+STORED.piecesOpen, STORED.openTalismans = nil, nil
+AchaeaTalismans = nil
+TRIGGERS = {}
+load()
+M = AchaeaTalismans
+check(M.data.piecesOpen == false and type(M.data.openTalismans) == "table" and next(M.data.openTalismans) == nil,
+      "an older file loads folded")
+STORED.openTalismans = "yes"
+AchaeaTalismans = nil
+TRIGGERS = {}
+load()
+M = AchaeaTalismans
+check(type(M.data.openTalismans) == "table", "a fold of the wrong type is not taken")
+
+-- A recompile with no file over data from an older version: the new keys
+-- are filled in rather than read as nil.
+local stored = STORED
+STORED = nil
+M.data.openTalismans, M.data.piecesOpen = nil, nil
+TRIGGERS = {}
+load()
+M = AchaeaTalismans
+check(type(M.data.openTalismans) == "table" and M.data.piecesOpen == false and #M.data.held > 0,
+      "a recompile fills in what an older version lacked, and keeps the rest")
+STORED = stored
 
 SAVE_FAILS = true
 ECHOED = {}

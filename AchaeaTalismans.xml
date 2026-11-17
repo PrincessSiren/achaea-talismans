@@ -60,7 +60,7 @@ COMBINE and SPLIT commands that get it there are still yours to type.
 AchaeaTalismans = AchaeaTalismans or {}
 local M = AchaeaTalismans
 
-M.VERSION = "0.1.1"
+M.VERSION = "0.2.0"
 M.BUILD = M.BUILD or "source"   -- build.py replaces this
 
 -- The name Mudlet knows the package by, which is what its uninstall event
@@ -82,12 +82,15 @@ local DATA_KEYS = {
   completed = "table",    -- talisman keyword -&gt; { name, set }
   focus     = "string",   -- the set the window shows, or "" for all held
   shown     = "boolean",  -- whether the window is open
+  piecesOpen = "boolean", -- whether the pieces held are listed or folded to a line
+  openTalismans = "table", -- talisman keyword -&gt; true, for those listing their pieces
 }
 
 local function fresh()
   return {
     sets = {}, setOrder = {}, talismans = {}, held = {}, heldAt = 0,
-    completed = {}, focus = "", shown = true,
+    completed = {}, focus = "", shown = true, piecesOpen = false,
+    openTalismans = {},
   }
 end
 
@@ -127,6 +130,11 @@ function M.path()
 end
 
 function M.load()
+  -- A recompile keeps M.data, which an older version may have made without
+  -- a key added since; with no file to read, nothing else would add it.
+  for key, value in pairs(fresh()) do
+    if M.data[key] == nil then M.data[key] = value end
+  end
   local path = M.path()
   if not (io.exists and io.exists(path)) then
     S.loaded = "none"
@@ -727,7 +735,11 @@ end
 
 -- -------------------------------------------------------------- the drawing
 
-M.BAR = 16
+M.BAR = 10
+-- Spaces between two columns of the layout.
+M.GAP = 3
+-- The width drawn to when the window cannot be measured.
+M.DEFAULT_WIDTH = 80
 local MARK = { done = "&lt;green&gt;●", started = "&lt;yellow&gt;◐", none = "&lt;dim_grey&gt;○" }
 
 local function bar(have, need)
@@ -749,9 +761,171 @@ local function fmt(n) return string.format("%d", n) end
 -- goes in as a quoted literal rather than pasted between quote marks.
 local function q(s) return string.format("%q", s) end
 
---- What the window shows, as a list of pieces: a string is coloured text,
---- a table is { text, code, hint } and becomes a link that runs the code.
-function M.render()
+--- How many columns a piece of cecho text takes on screen: its colour tags
+--- take none, and a bar or a mark is one column however many bytes it is.
+function M.textWidth(s)
+  s = s:gsub("&lt;[%w_,:]+&gt;", "")
+  local _, n = s:gsub("[^\128-\191]", "")
+  return n
+end
+
+-- A line is a list of pieces, as M.render returns them, with its width in w.
+local function newLine() return { w = 0 } end
+local function put(line, s)
+  line[#line + 1] = s
+  line.w = line.w + M.textWidth(s)
+  return line
+end
+local function putLink(line, text, code, hint)
+  line[#line + 1] = { text, code, hint }
+  line.w = line.w + M.textWidth(text)
+  return line
+end
+local BLANK = newLine()
+
+-- How many blank lines go between a block and the one under it: sep, or
+-- more if the block above asks for more with its own `after`.
+local function gapAfter(b, sep) return math.max(sep, b.after or 0) end
+
+-- Stack the blocks, in order, into columns no taller than height, with the
+-- gap above between two blocks in one column, and none at a column's foot.
+-- A block is never split.
+local function stack(blocks, height, sep)
+  local cols, col = {}, nil
+  for i, b in ipairs(blocks) do
+    local gap = i &gt; 1 and gapAfter(blocks[i - 1], sep) or 0
+    if col and #col + gap + #b &lt;= height then
+      for _ = 1, gap do col[#col + 1] = BLANK end
+    else
+      col = { w = 0 }
+      cols[#cols + 1] = col
+    end
+    for _, l in ipairs(b) do
+      col[#col + 1] = l
+      if l.w &gt; col.w then col.w = l.w end
+    end
+  end
+  return cols
+end
+
+--- Lay blocks of lines out in columns read top to bottom, as many as fit in
+--- width, each as wide as its widest line. The shortest layout that fits wins;
+--- one wider than the window is a single column.
+function M.layout(blocks, width, sep)
+  local tallest, total = 0, 0
+  for i, b in ipairs(blocks) do
+    if #b &gt; tallest then tallest = #b end
+    total = total + #b + (i &gt; 1 and gapAfter(blocks[i - 1], sep) or 0)
+  end
+  for height = tallest, total do
+    local cols = stack(blocks, height, sep)
+    local w = M.GAP * (#cols - 1)
+    for _, col in ipairs(cols) do w = w + col.w end
+    if w &lt;= width then return cols end
+  end
+  return stack(blocks, total, sep)
+end
+
+--- Emit columns row by row into out, padding each cell to its column's width.
+function M.emit(out, cols)
+  local rows = 0
+  for _, col in ipairs(cols) do if #col &gt; rows then rows = #col end end
+  for r = 1, rows do
+    local last = 0
+    for c, col in ipairs(cols) do if col[r] and col[r].w &gt; 0 then last = c end end
+    for c = 1, last do
+      local line = cols[c][r] or BLANK
+      out[#out + 1] = "&lt;reset&gt;"
+      for _, piece in ipairs(line) do out[#out + 1] = piece end
+      if c &lt; last then out[#out + 1] = string.rep(" ", cols[c].w - line.w + M.GAP) end
+    end
+    out[#out + 1] = "\n"
+  end
+end
+
+-- One talisman: its name and how far along it is, then, when it is open, a
+-- row per piece. A talisman with rows to show is folded to its name until
+-- clicked, so a long list stays a list of names.
+local function talismanBlock(tkw)
+  local d = M.data
+  local t = d.talismans[tkw]
+  local status = M.status(tkw)
+  local p = M.progress(tkw)
+  local rows = {}
+  if status == "done" then
+    -- Nothing left to show.
+  elseif p then
+    local lw, vw = 1, 1
+    for _, s in ipairs(p.slots) do
+      s.lvl = (s.count &gt; 1 and (fmt(s.count) .. "x") or "") .. "L" .. fmt(s.level)
+      lw = math.max(lw, math.min(#s.label, 16))
+      vw = math.max(vw, #s.lvl)
+    end
+    for _, s in ipairs(p.slots) do
+      rows[#rows + 1] = put(newLine(), "    &lt;reset&gt;" .. pad(s.label, lw) .. " &lt;dim_grey&gt;" .. pad(s.lvl, vw) .. " " ..
+        bar(s.have, s.need) .. " &lt;reset&gt;" .. fmt(s.have) .. "/" .. fmt(s.need))
+    end
+  else
+    for _, row in ipairs(d.held) do
+      if row.group == tkw then
+        rows[#rows + 1] = put(newLine(), "    &lt;reset&gt;" .. label(tkw, row.kw) .. " &lt;dim_grey&gt;" .. fmt(row.count) ..
+          " at L" .. fmt(row.level) .. " = " .. fmt(row.count * M.units(row.level)))
+      end
+    end
+  end
+
+  local open = #rows &gt; 0 and d.openTalismans[tkw] and true or false
+  local name = MARK[status] .. " &lt;white&gt;" .. (t and t.name or tkw)
+  local head = newLine()
+  if #rows &gt; 0 then
+    putLink(head, (open and "&lt;cyan&gt;▾ " or "&lt;cyan&gt;▸ ") .. name, "AchaeaTalismans.toggleTalisman(" .. q(tkw) .. ")",
+            open and "fold its pieces" or "list its pieces")
+  else
+    put(head, "  " .. name)
+  end
+  put(head, "&lt;reset&gt; &lt;dim_grey&gt;(" .. tkw .. ")")
+  if status == "done" then
+    put(head, "  &lt;green&gt;done")
+  elseif p then
+    local pct = p.need &gt; 0 and math.floor(100 * p.have / p.need) or 0
+    put(head, "  &lt;reset&gt;" .. fmt(p.ready) .. "/" .. fmt(#p.slots) .. " ready, " .. fmt(pct) .. "%")
+  else
+    put(head, "  &lt;dim_grey&gt;needs not read ")
+    putLink(head, "&lt;cyan&gt;[info]", "send(" .. q("talisman info " .. tkw) .. ", false)", "TALISMAN INFO " .. tkw)
+  end
+
+  local block = { head }
+  if open then
+    for _, l in ipairs(rows) do block[#block + 1] = l end
+    -- A blank line under an open talisman, to set it off from the next.
+    block.after = 1
+  end
+  return block
+end
+
+--- The talismans the window lists: the focused set's, or, with no set
+--- focused, those you hold pieces of.
+function M.listed()
+  local d = M.data
+  if d.focus == "" then return M.heldTalismans() end
+  local set = d.sets[d.focus]
+  local list = {}
+  if set and set.talismans then
+    for _, t in ipairs(set.talismans) do list[#list + 1] = t.kw end
+  else
+    for tkw, t in pairs(d.talismans) do
+      if M.setKey(t.set) == d.focus then list[#list + 1] = tkw end
+    end
+    table.sort(list)
+  end
+  return list
+end
+
+--- What the window shows, laid out for a window this many columns wide, as
+--- a list of pieces: a string is coloured text, a table is { text, code, hint }
+--- and becomes a link that runs the code.
+function M.render(width)
+  width = width or M.DEFAULT_WIDTH
   local out = {}
   local function add(s) out[#out + 1] = s end
   local function link(text, code, hint) out[#out + 1] = { text, code, hint } end
@@ -765,95 +939,129 @@ function M.render()
   end
   link("&lt;cyan&gt;[scan]", "AchaeaTalismans.scan()", "send TALISMAN SETS, PIECES, and INFO for what you hold")
   add(" ")
-  link("&lt;cyan&gt;[all]", "AchaeaTalismans.setFocus('')", "every talisman you hold pieces of")
+  link("&lt;cyan&gt;[all]", "AchaeaTalismans.setFocus('')", "the pieces you hold, and every set")
   add("\n\n")
+
+  -- [open all] [fold all], beside a heading if they fit and under it if not.
+  local ALL_WIDTH = #"[open all] [fold all]"
+  local function openAll()
+    link("&lt;cyan&gt;[open all]", "AchaeaTalismans.openAll(true)", "list every talisman's pieces")
+    add(" ")
+    link("&lt;cyan&gt;[fold all]", "AchaeaTalismans.openAll(false)", "fold every talisman to its name")
+  end
 
   local list
   if d.focus ~= "" then
     local set = d.sets[d.focus]
     local name = set and set.name or d.focus
-    add("&lt;white&gt;" .. name .. "&lt;reset&gt;")
-    if set and set.total then add("  " .. fmt(set.done) .. "/" .. fmt(set.total) .. " done") end
-    add("  ")
+    local done = (set and set.total) and ("  " .. fmt(set.done) .. "/" .. fmt(set.total) .. " done") or ""
+    add("&lt;white&gt;" .. name .. "&lt;reset&gt;" .. done .. "  ")
     link("&lt;cyan&gt;[scan set]", "AchaeaTalismans.scan(" .. q(d.focus) .. ")", "send TALISMAN SET and INFO for each of its talismans")
-    add("\n")
-    list = {}
-    if set and set.talismans then
-      for _, t in ipairs(set.talismans) do list[#list + 1] = t.kw end
-    else
-      for tkw, t in pairs(d.talismans) do
-        if M.setKey(t.set) == d.focus then list[#list + 1] = tkw end
-      end
-      table.sort(list)
-      if #list == 0 then add("&lt;dim_grey&gt;  its talismans are not read yet\n") end
+    add(" ")
+    link("&lt;cyan&gt;[back to sets]", "AchaeaTalismans.setFocus('')", "every talisman you hold pieces of, and every set")
+    list = M.listed()
+    if #list &gt; 0 then
+      local heading = M.textWidth(name .. done .. "  [scan set] [back to sets]")
+      add(heading + 1 + ALL_WIDTH &lt;= width and " " or "\n")
+      openAll()
     end
+    add("\n")
+    if #list == 0 then add("&lt;dim_grey&gt;  its talismans are not read yet\n") end
   else
     list = M.heldTalismans()
-    if #list == 0 then add("&lt;dim_grey&gt;No pieces read yet. TALISMAN PIECES, or [scan].\n") end
-  end
-
-  for _, tkw in ipairs(list) do
-    local t = d.talismans[tkw]
-    local status = M.status(tkw)
-    add("\n" .. MARK[status] .. " &lt;white&gt;" .. (t and t.name or tkw) .. "&lt;reset&gt; &lt;dim_grey&gt;(" .. tkw .. ")")
-    local p = M.progress(tkw)
-    if status == "done" then
-      add("  &lt;green&gt;done\n")
-    elseif p then
-      local pct = p.need &gt; 0 and math.floor(100 * p.have / p.need) or 0
-      add("  &lt;reset&gt;" .. fmt(p.ready) .. "/" .. fmt(#p.slots) .. " ready, " .. fmt(pct) .. "%\n")
-      for _, s in ipairs(p.slots) do
-        local count = s.count &gt; 1 and (fmt(s.count) .. "x") or ""
-        add("  &lt;reset&gt;" .. pad(s.label, 16) .. " &lt;dim_grey&gt;" .. pad(count .. "L" .. fmt(s.level), 5) .. " ")
-        add(bar(s.have, s.need) .. " &lt;reset&gt;" .. fmt(s.have) .. "/" .. fmt(s.need) .. "\n")
-      end
+    if #d.held == 0 then
+      add("&lt;dim_grey&gt;No pieces read yet. TALISMAN PIECES, or [scan].\n")
     else
-      add("  &lt;dim_grey&gt;needs not read ")
-      link("&lt;cyan&gt;[info]", "send(" .. q("talisman info " .. tkw) .. ", false)", "TALISMAN INFO " .. tkw)
-      add("\n")
-      for _, row in ipairs(d.held) do
-        if row.group == tkw then
-          add("  &lt;reset&gt;" .. pad(label(tkw, row.kw), 16) .. " &lt;dim_grey&gt;" .. fmt(row.count) .. " at L" .. fmt(row.level) ..
-              " = " .. fmt(row.count * M.units(row.level)) .. "\n")
+      -- Folded by default to one line, so the sets below are what shows.
+      local whole = 0
+      for _, tkw in ipairs(list) do
+        local p = M.status(tkw) ~= "done" and M.progress(tkw)
+        if p and #p.slots &gt; 0 and p.ready == #p.slots then whole = whole + 1 end
+      end
+      link((d.piecesOpen and "&lt;cyan&gt;▾ " or "&lt;cyan&gt;▸ ") .. "&lt;white&gt;Pieces you hold", "AchaeaTalismans.togglePieces()",
+           d.piecesOpen and "fold the pieces you hold" or "list the pieces you hold")
+      local pieces = 0
+      for _, row in ipairs(d.held) do pieces = pieces + row.count end
+      local summary = "  &lt;dim_grey&gt;" .. fmt(pieces) .. (pieces == 1 and " piece" or " pieces") ..
+          (#list &gt; 0 and (" of " .. fmt(#list) .. (#list == 1 and " talisman" or " talismans")) or "") ..
+          (whole &gt; 0 and (", " .. fmt(whole) .. " with every piece") or "")
+      add(summary)
+      if not d.piecesOpen then
+        list = {}
+        add("\n")
+      else
+        if #list &gt; 0 then
+          -- Beside the heading if they fit, else under it.
+          local heading = M.textWidth("▾ Pieces you hold" .. summary)
+          add(heading + 2 + ALL_WIDTH &lt;= width and "  " or "\n  ")
+          openAll()
         end
+        add("\n\n")
       end
     end
+  end
+
+  local blocks = {}
+  for _, tkw in ipairs(list) do blocks[#blocks + 1] = talismanBlock(tkw) end
+  if #blocks &gt; 0 then
+    if d.focus ~= "" then add("\n") end
+    M.emit(out, M.layout(blocks, width, 0))
   end
 
   local loose = {}
   for _, row in ipairs(d.held) do
-    if not (row.group or M.ownerOf(row.kw)) then loose[#loose + 1] = row end
-  end
-  if d.focus == "" and #loose &gt; 0 then
-    add("\n&lt;white&gt;Pieces of no known talisman&lt;reset&gt;\n")
-    for _, row in ipairs(loose) do
-      add("  &lt;reset&gt;" .. pad(row.kw, 24) .. " &lt;dim_grey&gt;" .. fmt(row.count) .. " at L" .. fmt(row.level) ..
-          " = " .. fmt(row.count * M.units(row.level)) .. "\n")
+    if not (row.group or M.ownerOf(row.kw)) then
+      loose[#loose + 1] = { put(newLine(), "&lt;reset&gt;" .. row.kw .. " &lt;dim_grey&gt;" .. fmt(row.count) .. " at L" ..
+        fmt(row.level) .. " = " .. fmt(row.count * M.units(row.level))) }
     end
+  end
+  if d.focus == "" and d.piecesOpen and #loose &gt; 0 then
+    add("\n&lt;white&gt;Pieces of no known talisman&lt;reset&gt;\n")
+    M.emit(out, M.layout(loose, width, 0))
   end
 
-  if #d.setOrder &gt; 0 then
+  -- One set is shown on its own: the window keeps to its bottom, so a sets
+  -- list drawn under the set's talismans would push them out of sight.
+  if d.focus ~= "" then
+    return out
+  elseif #d.setOrder &gt; 0 then
     add("\n&lt;white&gt;Sets&lt;reset&gt;  &lt;dim_grey&gt;click one to list its talismans\n")
+    local nw = 1
+    for _, kw in ipairs(d.setOrder) do nw = math.max(nw, #(d.sets[kw].name or kw)) end
+    local rows = {}
     for _, kw in ipairs(d.setOrder) do
       local set = d.sets[kw]
-      link("&lt;reset&gt;" .. pad(set.name or kw, 14), "AchaeaTalismans.setFocus(" .. q(kw) .. ")", "list the " .. (set.name or kw) .. " set")
+      local line = putLink(newLine(), "&lt;reset&gt;" .. pad(set.name or kw, nw), "AchaeaTalismans.setFocus(" .. q(kw) .. ")",
+        "list the " .. (set.name or kw) .. " set")
       -- A set read by TALISMAN SET alone has no counts yet.
       local counts = set.total and (fmt(set.done or 0) .. "/" .. fmt(set.total)) or "?"
-      local line = " &lt;dim_grey&gt;" .. pad(counts, 6)
+      local marks = " &lt;dim_grey&gt;" .. counts
       if set.talismans then
-        for _, t in ipairs(set.talismans) do line = line .. MARK[M.status(t.kw)] end
+        marks = " &lt;dim_grey&gt;" .. pad(counts, 5) .. " "
+        for _, t in ipairs(set.talismans) do marks = marks .. MARK[M.status(t.kw)] end
       end
-      add(line .. "\n")
+      rows[#rows + 1] = { put(line, marks) }
     end
+    M.emit(out, M.layout(rows, width, 0))
   else
     add("\n&lt;dim_grey&gt;Sets not read yet. TALISMAN SETS, or [scan].\n")
   end
   return out
 end
 
+--- How many columns the window can show. getColumnCount rounds up where the
+--- text is cut off, so one comes off. The main console (nil) is drawn at the
+--- default, and so is a window not there yet, for which getColumnCount raises.
+function M.width(win)
+  if win then
+    local ok, n = pcall(getColumnCount, win)
+    if ok and type(n) == "number" and n &gt; 1 then return math.max(20, math.floor(n) - 1) end
+  end
+  return M.DEFAULT_WIDTH
+end
 --- Draw the pieces M.render made into a window, or the main console for nil.
 function M.draw(win)
-  for _, piece in ipairs(M.render()) do
+  for _, piece in ipairs(M.render(M.width(win))) do
     if type(piece) == "table" then
       if win then cechoLink(win, piece[1], piece[2], piece[3], true)
       else cechoLink(piece[1], piece[2], piece[3], true) end
@@ -863,9 +1071,13 @@ function M.draw(win)
   end
 end
 
---- Open the window, or show it again if it was closed.
+--- Open the window, or show it again if it was closed. No dock area is
+--- given: Mudlet docks a new window on the right by itself, and given one it
+--- re-docks a window that already exists, every time, squeezing it into the
+--- right dock even when the player had floated or sized it elsewhere, and
+--- every click on a set name comes through here.
 function M.open()
-  openUserWindow(M.WINDOW, true, true, "right")
+  openUserWindow(M.WINDOW, true, true)
   pcall(setUserWindowTitle, M.WINDOW, "Talismans")
   S.opened = true
 end
@@ -877,8 +1089,28 @@ end
 function M.redraw()
   if not M.data.shown then return false end
   if not S.opened then M.open() end
+  -- A user window wraps at a fixed column, not at its edge, so a layout as
+  -- wide as the window would otherwise fold where that column falls.
+  S.drawnWidth = M.width(M.WINDOW)
+  pcall(setWindowWrap, M.WINDOW, S.drawnWidth)
   clearWindow(M.WINDOW)
   M.draw(M.WINDOW)
+  return true
+end
+
+-- How long a resize has to settle before the window is laid out again:
+-- dragging an edge raises the event at every step of the drag.
+M.RESIZE_WAIT = 0.25
+
+--- Lay the window out again once it has been resized to a different number
+--- of columns.
+function M.onResize(_, _, _, name)
+  if name ~= M.WINDOW or not M.data.shown then return false end
+  if S.resizeTimer then pcall(killTimer, S.resizeTimer) end
+  S.resizeTimer = tempTimer(M.RESIZE_WAIT, function()
+    S.resizeTimer = nil
+    if M.width(M.WINDOW) ~= S.drawnWidth then M.redraw() end
+  end)
   return true
 end
 
@@ -1032,6 +1264,30 @@ M.FORMS = {
   "^show$", "^hide$", "^all$", "^set%s+%S+$", "^scan$", "^scan%s+%S+$", "^stop$", "^diag$",
 }
 
+--- Fold one talisman to its name, or list its pieces.
+function M.toggleTalisman(kw)
+  M.data.openTalismans[kw] = (not M.data.openTalismans[kw]) or nil
+  M.save()
+  M.redraw()
+  return M.data.openTalismans[kw] == true
+end
+
+--- List the pieces of every talisman the window shows, or fold them all.
+function M.openAll(on)
+  for _, tkw in ipairs(M.listed()) do M.data.openTalismans[tkw] = on and true or nil end
+  M.save()
+  M.redraw()
+  return on and true or false
+end
+
+--- Fold the pieces held to one line, or list them.
+function M.togglePieces()
+  M.data.piecesOpen = not M.data.piecesOpen
+  M.save()
+  M.redraw()
+  return M.data.piecesOpen
+end
+
 --- `tals &lt;anything&gt;`: Mudlet runs every alias that matches, so this fires
 --- alongside the real ones too, and says something only when none of them did.
 function M.unknown(rest)
@@ -1103,6 +1359,8 @@ function M.stop()
   S.triggers = {}
   for _, id in ipairs(S.handlers or {}) do pcall(killAnonymousEventHandler, id) end
   S.handlers = {}
+  if S.resizeTimer then pcall(killTimer, S.resizeTimer) end
+  S.resizeTimer = nil
   M.stopScan(true)
   -- Reading state too: M.state lives on the global, through a recompile and
   -- through an uninstall and reinstall in one session, and the new copy
@@ -1136,6 +1394,7 @@ function M.start()
   S.handlers = {
     registerAnonymousEventHandler("sysUninstall", M.onUninstall),
     registerAnonymousEventHandler("sysDataSendRequest", function(_, cmd) M.onSend(cmd) end),
+    registerAnonymousEventHandler("sysUserWindowResizeEvent", function(...) M.onResize(...) end),
   }
   return true
 end
@@ -1145,7 +1404,7 @@ M.start()
 if M.data.shown then pcall(M.redraw) end
 
 -- Generated by build.py from its ALIASES table. Do not edit here.
-AchaeaTalismans.BUILD = "b0ea250d"
+AchaeaTalismans.BUILD = "06f0fcbd"
 AchaeaTalismans.COMMANDS = {
     { usage = "tals", help = "show the window, what has been read so far, and this list" },
     { usage = "tals show|hide", help = "open or close the window" },
