@@ -438,7 +438,24 @@ check(#M.data.held == before and M.heldUnits("silverdragonclaw") == 8, "and back
 M.setFocus("")
 local w = WINDOWS[M.WINDOW]
 check(w:find("a Red Dragon Talisman", 1, true) and w:find("0/8 ready, 4%", 1, true), "the red dragon's line")
-check(w:find("22/64", 1, true), "the claw's count")
+-- Each talisman is folded to its name until clicked.
+check(not w:find("22/64", 1, true) and w:find("▸ <yellow>◐ <white>a Red Dragon Talisman", 1, true), "folded to its name")
+check(w:find("(blackdragon)  <dim_grey>needs not read", 1, true), "what is missing shows folded, too")
+check(w:find("9 talismans  <cyan>[open all] <cyan>[fold all]\n", 1, true), "open all and fold all sit on the heading")
+local toggle, all = false, false
+for _, l in ipairs(LINKS) do
+  if l.win == M.WINDOW and l.code == 'AchaeaTalismans.toggleTalisman("reddragon")' then toggle = true end
+  if l.win == M.WINDOW and l.code == "AchaeaTalismans.openAll(true)" then all = true end
+end
+check(toggle and all, "its name is a link that opens it, and there is one for all of them")
+check(M.toggleTalisman("reddragon") == true and SAVED.openTalismans.reddragon == true, "a click opens one, and it is kept")
+w = WINDOWS[M.WINDOW]
+check(w:find("▾ <yellow>◐ <white>a Red Dragon Talisman", 1, true) and w:find("22/64", 1, true), "the claw's count")
+check(not w:find("heart <dim_grey>1 at L1", 1, true), "the others stay folded")
+check(M.toggleTalisman("reddragon") == false and SAVED.openTalismans.reddragon == nil, "a second click folds it")
+M.openAll(true)
+w = WINDOWS[M.WINDOW]
+check(w:find("22/64", 1, true) and w:find("heart <dim_grey>1 at L1", 1, true), "open all opens every one")
 check(w:find("Miscellaneous", 1, true), "the sets are listed")
 check(not w:find("stratospheric", 1, true), "a talisman with nothing held is not in the all view")
 M.setFocus("Dragon")
@@ -474,6 +491,17 @@ local function lines(text)
   for l in (text .. "\n"):gmatch("(.-)\n") do out[#out + 1] = l end
   return out
 end
+-- The most open talismans (▾, past the pieces heading's own) on one line.
+local function across(text)
+  local most = 0
+  for _, l in ipairs(lines(text)) do
+    if not l:find("Pieces you hold", 1, true) then
+      local _, n = l:gsub("▾ ", "")
+      most = math.max(most, n)
+    end
+  end
+  return most
+end
 local function sideBySide(text, a, b)
   for _, l in ipairs(lines(text)) do
     if l:find(a, 1, true) and l:find(b, 1, true) then return true end
@@ -481,14 +509,21 @@ local function sideBySide(text, a, b)
   return false
 end
 check(M.textWidth("<green>██<dim_grey>░░ <reset>2/4") == 8, "a bar's width is its columns, not its bytes")
-for _, width in ipairs({ 60, 120, 200 }) do
-  local widest = 0
-  for _, l in ipairs(lines(shown(width))) do widest = math.max(widest, M.textWidth(l)) end
-  check(widest <= width, "nothing drawn at " .. width .. " columns is wider, got " .. widest)
+for _, focus in ipairs({ "", "dragon" }) do
+  M.data.focus = focus
+  for _, width in ipairs({ 60, 120, 200 }) do
+    local widest = 0
+    for _, l in ipairs(lines(shown(width))) do widest = math.max(widest, M.textWidth(l)) end
+    check(widest <= width, "nothing drawn at " .. width .. " columns is wider, got " .. widest .. " in " .. focus)
+  end
 end
-check(not sideBySide(shown(60), "(blackdragon)", "(silverdragon)"), "a narrow window has one column of talismans")
+check(shown(120):find("[back to sets] <cyan>[open all]", 1, true), "a set's heading spaces its links")
+M.data.focus = ""
+check(across(shown(60)) == 1, "a narrow window has one column of talismans")
 check(sideBySide(shown(60), "Dragon ", "yggdrasil"), "and two of sets")
-check(sideBySide(shown(200), "(blackdragon)", "(silverdragon)"), "a wide one has several of talismans")
+check(across(shown(200)) >= 3, "a wide one has several of talismans, got " .. across(shown(200)))
+check(not shown(200):find("\n\n\n", 1, true) and not shown(60):find("\n\n\n", 1, true),
+      "an open talisman's blank line is never two, nor at a column's foot")
 check(#lines(shown(200)) < #lines(shown(60)) / 2, "and is less than half as tall")
 check(not shown(80):find(" \n"), "no line ends in padding")
 check(shown(1):find("22/64", 1, true), "a window narrower than anything is one column")
@@ -509,20 +544,28 @@ check(laid(17, 1) == "aaaa   bbbbbb\naa\n       cc\n", "one column less, and C g
 check(laid(17, 0) == "aaaa   bbbbbb\naa     cc\n", "with no sep, C sits right under B: " .. laid(17, 0))
 check(laid(9, 1) == "aaaa\naa\n\nbbbbbb\n\ncc\n", "a window narrower than two columns is one: " .. laid(9, 1))
 check(#M.layout({ { L(string.rep("x", 50)) }, { L("y") } }, 20, 0) == 1, "a block wider than the window is one column")
+do
+  -- A block's own `after` puts blank lines under it, between it and the next
+  -- block in its column only.
+  local out = {}
+  M.emit(out, M.layout({ { L("aaaa"), L("aa"), after = 1 }, { L("bbbbbb") }, { L("cc") } }, 9, 0))
+  local got = (table.concat(out):gsub("<[%w_,:]+>", ""))
+  check(got == "aaaa\naa\n\nbbbbbb\ncc\n", "an open block's blank line, and none after the others: " .. got)
+end
 
 -- The README's example rows, as drawn: labels padded to the longest in the
 -- talisman (leather, of the eight), a 10-cell bar, 22 of 64 filling three.
 local plain = shown(80):gsub("<[%w_,:]+>", "")
-check(plain:find("\n  claw    L7 ███░░░░░░░ 22/64", 1, true) and plain:find("\n  heart   L7 ░░░░░░░░░░ 0/64", 1, true),
+check(plain:find("\n    claw    L7 ███░░░░░░░ 22/64", 1, true) and plain:find("\n    heart   L7 ░░░░░░░░░░ 0/64", 1, true),
       "the README's rows are what is drawn")
 local readme = assert(io.open(HERE .. "/README.md")):read("*a")
-check(readme:find("  claw    L7 ███░░░░░░░ 22/64", 1, true), "and the README shows them")
+check(readme:find("    claw    L7 ███░░░░░░░ 22/64", 1, true), "and the README shows them")
 
 -- The window is measured, given a wrap to match, and laid out again when it
 -- is resized to a different width, once the drag has settled.
 COLUMNS = 61
 M.redraw()
-check(WRAP == 60 and not sideBySide(WINDOWS[M.WINDOW], "(blackdragon)", "(silverdragon)"),
+check(WRAP == 60 and across(WINDOWS[M.WINDOW]) == 1,
       "the window is drawn to its measured width, one column off")
 COLUMNS = 201
 raise("sysUserWindowResizeEvent", 1600, 400, "SomeOtherWindow")
@@ -532,7 +575,7 @@ raise("sysUserWindowResizeEvent", 1500, 400, M.WINDOW)
 raise("sysUserWindowResizeEvent", 1600, 400, M.WINDOW)
 check(count(TIMERS) == 1, "a drag is waited out with one timer")
 fireTimers()
-check(WRAP == 200 and sideBySide(WINDOWS[M.WINDOW], "(blackdragon)", "(silverdragon)"), "and laid out again")
+check(WRAP == 200 and across(WINDOWS[M.WINDOW]) >= 3, "and laid out again")
 local drawn = #LINKS
 raise("sysUserWindowResizeEvent", 1600, 401, M.WINDOW)
 fireTimers()

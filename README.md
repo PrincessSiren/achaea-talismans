@@ -8,14 +8,16 @@ It reads what the game prints for `TALISMAN PIECES`, `TALISMAN INFO`,
 and draws each talisman's pieces as bars:
 
 ```
-◐ a Red Dragon Talisman (reddragon)  0/8 ready, 4%
-  claw    L7 ███░░░░░░░ 22/64
-  heart   L7 ░░░░░░░░░░ 0/64
+▾ ◐ a Red Dragon Talisman (reddragon)  0/8 ready, 4%
+    claw    L7 ███░░░░░░░ 22/64
+    heart   L7 ░░░░░░░░░░ 0/64
 ```
 
 The pieces you hold are folded to one line, `▸ Pieces you hold`, with a
-count; clicking it lists them, and clicking again folds them. The window
-remembers which. It lays itself out in as many columns as fit its width,
+count; clicking it lists them, and clicking again folds them. Listed, each
+talisman is folded in turn to its name and how far along it is, and
+clicking a name shows its pieces, as above. `[open all]` and `[fold all]`
+do every talisman at once. The window remembers what is open. It lays itself out in as many columns as fit its width,
 and again when it is resized, so a wide window shows several talismans side
 by side. Below the pieces, it lists every set with a mark for each of its
 talismans: done, started or not started. A set's name is a link that shows

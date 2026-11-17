@@ -76,12 +76,14 @@ local DATA_KEYS = {
   focus     = "string",   -- the set the window shows, or "" for all held
   shown     = "boolean",  -- whether the window is open
   piecesOpen = "boolean", -- whether the pieces held are listed or folded to a line
+  openTalismans = "table", -- talisman keyword -> true, for those listing their pieces
 }
 
 local function fresh()
   return {
     sets = {}, setOrder = {}, talismans = {}, held = {}, heldAt = 0,
     completed = {}, focus = "", shown = true, piecesOpen = false,
+    openTalismans = {},
   }
 end
 
@@ -769,13 +771,19 @@ local function putLink(line, text, code, hint)
 end
 local BLANK = newLine()
 
--- Stack the blocks, in order, into columns no taller than height, with sep
--- blank lines between two blocks in one column. A block is never split.
+-- How many blank lines go between a block and the one under it: sep, or
+-- more if the block above asks for more with its own `after`.
+local function gapAfter(b, sep) return math.max(sep, b.after or 0) end
+
+-- Stack the blocks, in order, into columns no taller than height, with the
+-- gap above between two blocks in one column, and none at a column's foot.
+-- A block is never split.
 local function stack(blocks, height, sep)
   local cols, col = {}, nil
-  for _, b in ipairs(blocks) do
-    if col and #col + sep + #b <= height then
-      for _ = 1, sep do col[#col + 1] = BLANK end
+  for i, b in ipairs(blocks) do
+    local gap = i > 1 and gapAfter(blocks[i - 1], sep) or 0
+    if col and #col + gap + #b <= height then
+      for _ = 1, gap do col[#col + 1] = BLANK end
     else
       col = { w = 0 }
       cols[#cols + 1] = col
@@ -795,7 +803,7 @@ function M.layout(blocks, width, sep)
   local tallest, total = 0, 0
   for i, b in ipairs(blocks) do
     if #b > tallest then tallest = #b end
-    total = total + #b + (i > 1 and sep or 0)
+    total = total + #b + (i > 1 and gapAfter(blocks[i - 1], sep) or 0)
   end
   for height = tallest, total do
     local cols = stack(blocks, height, sep)
@@ -823,19 +831,18 @@ function M.emit(out, cols)
   end
 end
 
--- One talisman: its name, then a row per piece it needs.
+-- One talisman: its name and how far along it is, then, when it is open, a
+-- row per piece. A talisman with rows to show is folded to its name until
+-- clicked, so a long list stays a list of names.
 local function talismanBlock(tkw)
   local d = M.data
   local t = d.talismans[tkw]
   local status = M.status(tkw)
-  local head = put(newLine(), MARK[status] .. " <white>" .. (t and t.name or tkw) .. "<reset> <dim_grey>(" .. tkw .. ")")
-  local block = { head }
   local p = M.progress(tkw)
+  local rows = {}
   if status == "done" then
-    put(head, "  <green>done")
+    -- Nothing left to show.
   elseif p then
-    local pct = p.need > 0 and math.floor(100 * p.have / p.need) or 0
-    put(head, "  <reset>" .. fmt(p.ready) .. "/" .. fmt(#p.slots) .. " ready, " .. fmt(pct) .. "%")
     local lw, vw = 1, 1
     for _, s in ipairs(p.slots) do
       s.lvl = (s.count > 1 and (fmt(s.count) .. "x") or "") .. "L" .. fmt(s.level)
@@ -843,21 +850,63 @@ local function talismanBlock(tkw)
       vw = math.max(vw, #s.lvl)
     end
     for _, s in ipairs(p.slots) do
-      block[#block + 1] = put(newLine(), "  <reset>" .. pad(s.label, lw) .. " <dim_grey>" .. pad(s.lvl, vw) .. " " ..
+      rows[#rows + 1] = put(newLine(), "    <reset>" .. pad(s.label, lw) .. " <dim_grey>" .. pad(s.lvl, vw) .. " " ..
         bar(s.have, s.need) .. " <reset>" .. fmt(s.have) .. "/" .. fmt(s.need))
     end
   else
-    local line = put(newLine(), "  <dim_grey>needs not read ")
-    putLink(line, "<cyan>[info]", "send(" .. q("talisman info " .. tkw) .. ", false)", "TALISMAN INFO " .. tkw)
-    block[#block + 1] = line
     for _, row in ipairs(d.held) do
       if row.group == tkw then
-        block[#block + 1] = put(newLine(), "  <reset>" .. label(tkw, row.kw) .. " <dim_grey>" .. fmt(row.count) ..
+        rows[#rows + 1] = put(newLine(), "    <reset>" .. label(tkw, row.kw) .. " <dim_grey>" .. fmt(row.count) ..
           " at L" .. fmt(row.level) .. " = " .. fmt(row.count * M.units(row.level)))
       end
     end
   end
+
+  local open = #rows > 0 and d.openTalismans[tkw] and true or false
+  local name = MARK[status] .. " <white>" .. (t and t.name or tkw)
+  local head = newLine()
+  if #rows > 0 then
+    putLink(head, (open and "<cyan>▾ " or "<cyan>▸ ") .. name, "AchaeaTalismans.toggleTalisman(" .. q(tkw) .. ")",
+            open and "fold its pieces" or "list its pieces")
+  else
+    put(head, "  " .. name)
+  end
+  put(head, "<reset> <dim_grey>(" .. tkw .. ")")
+  if status == "done" then
+    put(head, "  <green>done")
+  elseif p then
+    local pct = p.need > 0 and math.floor(100 * p.have / p.need) or 0
+    put(head, "  <reset>" .. fmt(p.ready) .. "/" .. fmt(#p.slots) .. " ready, " .. fmt(pct) .. "%")
+  else
+    put(head, "  <dim_grey>needs not read ")
+    putLink(head, "<cyan>[info]", "send(" .. q("talisman info " .. tkw) .. ", false)", "TALISMAN INFO " .. tkw)
+  end
+
+  local block = { head }
+  if open then
+    for _, l in ipairs(rows) do block[#block + 1] = l end
+    -- A blank line under an open talisman, to set it off from the next.
+    block.after = 1
+  end
   return block
+end
+
+--- The talismans the window lists: the focused set's, or, with no set
+--- focused, those you hold pieces of.
+function M.listed()
+  local d = M.data
+  if d.focus == "" then return M.heldTalismans() end
+  local set = d.sets[d.focus]
+  local list = {}
+  if set and set.talismans then
+    for _, t in ipairs(set.talismans) do list[#list + 1] = t.kw end
+  else
+    for tkw, t in pairs(d.talismans) do
+      if M.setKey(t.set) == d.focus then list[#list + 1] = tkw end
+    end
+    table.sort(list)
+  end
+  return list
 end
 
 --- What the window shows, laid out for a window this many columns wide, as
@@ -881,27 +930,31 @@ function M.render(width)
   link("<cyan>[all]", "AchaeaTalismans.setFocus('')", "the pieces you hold, and every set")
   add("\n\n")
 
+  -- [open all] [fold all], beside a heading if they fit and under it if not.
+  local ALL_WIDTH = #"[open all] [fold all]"
+  local function openAll()
+    link("<cyan>[open all]", "AchaeaTalismans.openAll(true)", "list every talisman's pieces")
+    add(" ")
+    link("<cyan>[fold all]", "AchaeaTalismans.openAll(false)", "fold every talisman to its name")
+  end
+
   local list
   if d.focus ~= "" then
     local set = d.sets[d.focus]
     local name = set and set.name or d.focus
-    add("<white>" .. name .. "<reset>")
-    if set and set.total then add("  " .. fmt(set.done) .. "/" .. fmt(set.total) .. " done") end
-    add("  ")
+    local done = (set and set.total) and ("  " .. fmt(set.done) .. "/" .. fmt(set.total) .. " done") or ""
+    add("<white>" .. name .. "<reset>" .. done .. "  ")
     link("<cyan>[scan set]", "AchaeaTalismans.scan(" .. q(d.focus) .. ")", "send TALISMAN SET and INFO for each of its talismans")
     add(" ")
     link("<cyan>[back to sets]", "AchaeaTalismans.setFocus('')", "every talisman you hold pieces of, and every set")
-    add("\n")
-    list = {}
-    if set and set.talismans then
-      for _, t in ipairs(set.talismans) do list[#list + 1] = t.kw end
-    else
-      for tkw, t in pairs(d.talismans) do
-        if M.setKey(t.set) == d.focus then list[#list + 1] = tkw end
-      end
-      table.sort(list)
-      if #list == 0 then add("<dim_grey>  its talismans are not read yet\n") end
+    list = M.listed()
+    if #list > 0 then
+      local heading = M.textWidth(name .. done .. "  [scan set] [back to sets]")
+      add(heading + 1 + ALL_WIDTH <= width and " " or "\n")
+      openAll()
     end
+    add("\n")
+    if #list == 0 then add("<dim_grey>  its talismans are not read yet\n") end
   else
     list = M.heldTalismans()
     if #d.held == 0 then
@@ -917,10 +970,22 @@ function M.render(width)
            d.piecesOpen and "fold the pieces you hold" or "list the pieces you hold")
       local pieces = 0
       for _, row in ipairs(d.held) do pieces = pieces + row.count end
-      add("  <dim_grey>" .. fmt(pieces) .. (pieces == 1 and " piece" or " pieces") ..
+      local summary = "  <dim_grey>" .. fmt(pieces) .. (pieces == 1 and " piece" or " pieces") ..
           (#list > 0 and (" of " .. fmt(#list) .. (#list == 1 and " talisman" or " talismans")) or "") ..
-          (whole > 0 and (", " .. fmt(whole) .. " with every piece") or "") .. "\n")
-      if not d.piecesOpen then list = {} else add("\n") end
+          (whole > 0 and (", " .. fmt(whole) .. " with every piece") or "")
+      add(summary)
+      if not d.piecesOpen then
+        list = {}
+        add("\n")
+      else
+        if #list > 0 then
+          -- Beside the heading if they fit, else under it.
+          local heading = M.textWidth("▾ Pieces you hold" .. summary)
+          add(heading + 2 + ALL_WIDTH <= width and "  " or "\n  ")
+          openAll()
+        end
+        add("\n\n")
+      end
     end
   end
 
@@ -928,7 +993,7 @@ function M.render(width)
   for _, tkw in ipairs(list) do blocks[#blocks + 1] = talismanBlock(tkw) end
   if #blocks > 0 then
     if d.focus ~= "" then add("\n") end
-    M.emit(out, M.layout(blocks, width, 1))
+    M.emit(out, M.layout(blocks, width, 0))
   end
 
   local loose = {}
@@ -1186,6 +1251,22 @@ end
 M.FORMS = {
   "^show$", "^hide$", "^all$", "^set%s+%S+$", "^scan$", "^scan%s+%S+$", "^stop$", "^diag$",
 }
+
+--- Fold one talisman to its name, or list its pieces.
+function M.toggleTalisman(kw)
+  M.data.openTalismans[kw] = (not M.data.openTalismans[kw]) or nil
+  M.save()
+  M.redraw()
+  return M.data.openTalismans[kw] == true
+end
+
+--- List the pieces of every talisman the window shows, or fold them all.
+function M.openAll(on)
+  for _, tkw in ipairs(M.listed()) do M.data.openTalismans[tkw] = on and true or nil end
+  M.save()
+  M.redraw()
+  return on and true or false
+end
 
 --- Fold the pieces held to one line, or list them.
 function M.togglePieces()
