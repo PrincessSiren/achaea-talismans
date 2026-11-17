@@ -75,12 +75,13 @@ local DATA_KEYS = {
   completed = "table",    -- talisman keyword -> { name, set }
   focus     = "string",   -- the set the window shows, or "" for all held
   shown     = "boolean",  -- whether the window is open
+  piecesOpen = "boolean", -- whether the pieces held are listed or folded to a line
 }
 
 local function fresh()
   return {
     sets = {}, setOrder = {}, talismans = {}, held = {}, heldAt = 0,
-    completed = {}, focus = "", shown = true,
+    completed = {}, focus = "", shown = true, piecesOpen = false,
   }
 end
 
@@ -877,7 +878,7 @@ function M.render(width)
   end
   link("<cyan>[scan]", "AchaeaTalismans.scan()", "send TALISMAN SETS, PIECES, and INFO for what you hold")
   add(" ")
-  link("<cyan>[all]", "AchaeaTalismans.setFocus('')", "every talisman you hold pieces of")
+  link("<cyan>[all]", "AchaeaTalismans.setFocus('')", "the pieces you hold, and every set")
   add("\n\n")
 
   local list
@@ -903,7 +904,24 @@ function M.render(width)
     end
   else
     list = M.heldTalismans()
-    if #list == 0 then add("<dim_grey>No pieces read yet. TALISMAN PIECES, or [scan].\n") end
+    if #d.held == 0 then
+      add("<dim_grey>No pieces read yet. TALISMAN PIECES, or [scan].\n")
+    else
+      -- Folded by default to one line, so the sets below are what shows.
+      local whole = 0
+      for _, tkw in ipairs(list) do
+        local p = M.status(tkw) ~= "done" and M.progress(tkw)
+        if p and #p.slots > 0 and p.ready == #p.slots then whole = whole + 1 end
+      end
+      link((d.piecesOpen and "<cyan>▾ " or "<cyan>▸ ") .. "<white>Pieces you hold", "AchaeaTalismans.togglePieces()",
+           d.piecesOpen and "fold the pieces you hold" or "list the pieces you hold")
+      local pieces = 0
+      for _, row in ipairs(d.held) do pieces = pieces + row.count end
+      add("  <dim_grey>" .. fmt(pieces) .. (pieces == 1 and " piece" or " pieces") ..
+          (#list > 0 and (" of " .. fmt(#list) .. (#list == 1 and " talisman" or " talismans")) or "") ..
+          (whole > 0 and (", " .. fmt(whole) .. " with every piece") or "") .. "\n")
+      if not d.piecesOpen then list = {} else add("\n") end
+    end
   end
 
   local blocks = {}
@@ -920,7 +938,7 @@ function M.render(width)
         fmt(row.level) .. " = " .. fmt(row.count * M.units(row.level))) }
     end
   end
-  if d.focus == "" and #loose > 0 then
+  if d.focus == "" and d.piecesOpen and #loose > 0 then
     add("\n<white>Pieces of no known talisman<reset>\n")
     M.emit(out, M.layout(loose, width, 0))
   end
@@ -1168,6 +1186,14 @@ end
 M.FORMS = {
   "^show$", "^hide$", "^all$", "^set%s+%S+$", "^scan$", "^scan%s+%S+$", "^stop$", "^diag$",
 }
+
+--- Fold the pieces held to one line, or list them.
+function M.togglePieces()
+  M.data.piecesOpen = not M.data.piecesOpen
+  M.save()
+  M.redraw()
+  return M.data.piecesOpen
+end
 
 --- `tals <anything>`: Mudlet runs every alias that matches, so this fires
 --- alongside the real ones too, and says something only when none of them did.

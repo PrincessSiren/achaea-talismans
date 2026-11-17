@@ -345,6 +345,18 @@ check(#M.heldTalismans() == 9, "nine talismans held, got " .. #M.heldTalismans()
 
 -- Before INFO, a talisman shows only what is held.
 check(M.progress("reddragon") == nil, "no progress without INFO")
+-- The pieces held are folded to one line until asked for.
+check(M.data.piecesOpen == false and not WINDOWS[M.WINDOW]:find("needs not read", 1, true),
+      "the pieces held are folded by default")
+check(WINDOWS[M.WINDOW]:find("▸ <white>Pieces you hold", 1, true) and WINDOWS[M.WINDOW]:find(" of 9 talismans", 1, true),
+      "to a line that says how many")
+local fold = false
+for _, l in ipairs(LINKS) do
+  if l.win == M.WINDOW and l.code == "AchaeaTalismans.togglePieces()" then fold = true end
+end
+check(fold, "which is a link")
+check(M.togglePieces() == true and SAVED.piecesOpen == true, "a click lists them, and it is kept")
+check(WINDOWS[M.WINDOW]:find("▾ <white>Pieces you hold", 1, true), "the arrow turns")
 check(WINDOWS[M.WINDOW]:find("needs not read", 1, true), "the window says what is missing")
 
 -- ------------------------------------------------------------------ INFO
@@ -656,6 +668,10 @@ CLOCK = CLOCK + M.ASKED_FOR + 1
 M.data.held = {}
 game(TPIECES_SILVER)
 check(#M.heldTalismans() == 0 and #M.data.held == 5, "too late to tell whose, kept anyway")
+check(WINDOWS[M.WINDOW]:find("Pieces you hold  <dim_grey>6 pieces\n", 1, true) and
+      not WINDOWS[M.WINDOW]:find("Pieces of no known talisman", 1, true),
+      "folded, with no talisman to count, got: " .. WINDOWS[M.WINDOW]:sub(1, 300))
+M.togglePieces()
 check(WINDOWS[M.WINDOW]:find("Pieces of no known talisman", 1, true), "and shown")
 
 -- TALISMAN SET before SETS: stored under the keyword SET printed, then taken
