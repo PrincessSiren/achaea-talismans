@@ -33,9 +33,11 @@ side. The sets are always two columns, each half the window, and a set
 with more marks than fit on its line wraps them onto the next, under its
 first marks. Docked under Mudlet's mapper, the window is as wide as the
 mapper. A window too narrow to show four marks a line in half of it lists
-the sets in one column. The window has a scroll bar, which Mudlet leaves off
-a user window unless asked, so a window shorter than its contents shows
-that there is more above. Mudlet's own column count for a window can be a few too many, since
+the sets in one column. When the window is too short for all of it, it shows
+a scroll bar, which Mudlet otherwise leaves off a user window, so there is a
+sign of more above; when everything fits, the bar goes. Like the columns,
+Mudlet's count of a window's lines can be a little high, so the package
+works out the lines that fit for certain. Mudlet's own column count for a window can be a few too many, since
 it divides by the font's average character width as a fraction while each
 character is drawn a whole number of pixels wide. So the package works out
 from it how many columns fit for certain, and may leave a column or two

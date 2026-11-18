@@ -48,8 +48,14 @@ function openUserWindow(name, _, _, area)
   if area ~= nil then DOCKED_TO = area end
 end
 function setUserWindowTitle() end
-local SCROLLBAR = {}
-function enableScrollBar(name) SCROLLBAR[name] = true end
+local SCROLLBAR, BAR_CHANGES = {}, 0
+function enableScrollBar(name) SCROLLBAR[name] = true; BAR_CHANGES = BAR_CHANGES + 1 end
+function disableScrollBar(name) SCROLLBAR[name] = false; BAR_CHANGES = BAR_CHANGES + 1 end
+local ROWS = nil
+function getRowCount(name)
+  if ROWS == nil then error("getRowCount: bad argument #1 type (window name \"" .. tostring(name) .. "\" not found)") end
+  return ROWS
+end
 function clearWindow(name) WINDOWS[name] = "" end
 function hideWindow() HIDDEN = HIDDEN + 1 end
 local COLUMNS, WRAP = nil, nil
@@ -352,7 +358,7 @@ local M = AchaeaTalismans
 check(count(TRIGGERS) == 1, "one trigger")
 check(OPENED >= 1 and WINDOWS[M.WINDOW] ~= nil, "a fresh install opens its window")
 check(WINDOWS[M.WINDOW]:find("No pieces read yet", 1, true), "an empty window says what to do")
-check(SCROLLBAR[M.WINDOW], "the window has a scroll bar, so a window too short for it shows there is more")
+check(SCROLLBAR[M.WINDOW] == true, "a window whose lines cannot be counted has its scroll bar")
 check(count(TIMERS) >= 1, "and is measured again once the bar has taken its width")
 check(#SENT == 0, "installing sends nothing")
 
@@ -1071,6 +1077,46 @@ check(M.state.asked and M.state.asked.kw == "silver", "a real short form is")
 M.state.asked = nil
 
 -- --------------------------------------------------------- saving, loading
+
+-- The scroll bar shows only when there is more than the window shows.
+do
+  M.data.shown = true
+  COLUMNS, CELL, ROWS = 80, 8, 200
+  fireTimers()
+  M.redraw()
+  check(SCROLLBAR[M.WINDOW] == false, "everything fits: no bar")
+  local drawn = M.state.drawnLines
+  check(drawn > 5, "the lines drawn are counted, got " .. tostring(drawn))
+  fireTimers()   -- the measure after the bar went: same width, same lines
+  local changes = BAR_CHANGES
+  M.redraw()
+  fireTimers()
+  check(BAR_CHANGES == changes, "a redraw that still fits leaves the bar alone")
+  -- 16-pixel lines: rows from getRowCount n are (n - 0.5)(15.5)/16, floored.
+  -- 16-pixel lines: a row count of n is (n - 0.5)(15.5)/16 rows, floored.
+  ROWS = 50
+  check(M.rows(M.WINDOW) == math.floor(49.5 * 15.5 / 16), "rows are what fit for certain")
+  -- The smallest row count that fits the lines drawn, and the one under it.
+  local fits = 2
+  repeat fits = fits + 1; ROWS = fits until M.rows(M.WINDOW) >= drawn
+  M.redraw()
+  check(SCROLLBAR[M.WINDOW] == false, "just enough rows: no bar")
+  ROWS = fits - 1
+  M.redraw()
+  check(SCROLLBAR[M.WINDOW] == true, "more lines than fit for certain: the bar")
+  -- The window made taller, at the same width: the bar goes, with no redraw.
+  ROWS = 200
+  local links = #LINKS
+  raise("sysUserWindowResizeEvent", 600, 2000, M.WINDOW)
+  fireTimers()
+  check(SCROLLBAR[M.WINDOW] == false and #LINKS == links, "a taller window drops the bar without drawing again")
+  -- A window that cannot say its rows keeps the bar.
+  ROWS = nil
+  M.redraw()
+  check(SCROLLBAR[M.WINDOW] == true, "rows unknown: the bar stays")
+  fireTimers()
+  COLUMNS, CELL = nil, nil
+end
 
 local saved = SAVED
 STORED = {}
