@@ -43,8 +43,8 @@ COMBINE and SPLIT commands that get it there are still yours to type.
   tals show|hide       the window
   tals all             the window lists every talisman you hold pieces of
   tals set <set>       the window lists one set's talismans
-  tals scan            TALISMAN LIST and PIECES, then INFO for each talisman
-                       you hold pieces of and have not read yet
+  tals scan            TALISMAN LIST and PIECES, SET for every set, then INFO
+                       for each talisman you hold pieces of and have not read
   tals scan <set>      TALISMAN SET <set> and PIECES, then INFO for each of its
                        talismans
   tals stop            stop a scan
@@ -55,7 +55,7 @@ COMBINE and SPLIT commands that get it there are still yours to type.
 AchaeaTalismans = AchaeaTalismans or {}
 local M = AchaeaTalismans
 
-M.VERSION = "0.3.0"
+M.VERSION = "0.4.0"
 M.BUILD = M.BUILD or "source"   -- build.py replaces this
 
 -- The name Mudlet knows the package by, which is what its uninstall event
@@ -1037,7 +1037,7 @@ function M.render(width)
   else
     add("<dim_grey>  pieces not read yet  ")
   end
-  link("<cyan>[scan]", "AchaeaTalismans.scan()", "send TALISMAN LIST and PIECES, then INFO for what you hold")
+  link("<cyan>[scan]", "AchaeaTalismans.scan()", "send TALISMAN LIST, PIECES and SET for every set, then INFO for what you hold")
   add(" ")
   link("<cyan>[all]", "AchaeaTalismans.setFocus('')", "the pieces you hold, and every set")
   add("\n\n")
@@ -1149,13 +1149,45 @@ function M.render(width)
   return out
 end
 
---- How many columns the window can show. getColumnCount rounds up where the
---- text is cut off, so one comes off. The main console (nil) is drawn at the
---- default, and so is a window not there yet, for which getColumnCount raises.
+--- The width in pixels of one character cell in a window. 5.1 says exactly,
+--- with calcFontSize(win, true). 5.0 raises for that form, and its
+--- calcFontSize(win) is the width of a "W", the nearest it has.
+function M.cellWidth(win)
+  if type(calcFontSize) ~= "function" then return nil end
+  for _, args in ipairs({ { win, true }, { win } }) do
+    local ok, w = pcall(calcFontSize, args[1], args[2])
+    if ok and type(w) == "number" and w > 0 then return w end
+  end
+  return nil
+end
+
+--- How many columns the window can show, all of them in full.
+---
+--- getColumnCount is not that. It is the window's width over the font's
+--- average character width as a fraction (QFontMetricsF), rounded, while
+--- every character is drawn in a cell as wide as that average rounded to a
+--- whole pixel (TTextEdit's mFontWidth, in 5.0.1 and 5.1.0 alike). With an
+--- average of 7.6 drawn at 8, it counts five columns in a hundred too many,
+--- and a layout fitted to it ran past the window's right edge.
+---
+--- From what it does say: the width is at least (n - 0.5) averages, and the
+--- average is at least the cell less half a pixel. So (n - 0.5)(cell - 0.5)
+--- pixels are there for certain, which is that over the cell in columns. It
+--- may give up a column or two that would have fit; it never draws past the
+--- edge. With no cell width to go on, one column comes off, as before.
+---
+--- The main console (nil) is drawn at the default, and so is a window not
+--- there yet, for which getColumnCount raises.
 function M.width(win)
   if win then
     local ok, n = pcall(getColumnCount, win)
-    if ok and type(n) == "number" and n > 1 then return math.max(20, math.floor(n) - 1) end
+    if ok and type(n) == "number" and n > 1 then
+      local cell = M.cellWidth(win)
+      if cell and cell > 1 then
+        return math.max(20, math.floor((n - 0.5) * (cell - 0.5) / cell))
+      end
+      return math.max(20, math.floor(n) - 1)
+    end
   end
   return M.DEFAULT_WIDTH
 end
@@ -1302,7 +1334,9 @@ function M.scan(setKw)
     -- LIST rather than SETS: it prints the same sets table, after the
     -- talismans you have done, which is the only place those are listed.
     queue = {
-      { cmd = "talisman list", kind = "sets", kinds = { tlist = true } },
+      -- After LIST, SET for every set it listed: the only listing that says
+      -- which talismans a set holds, and so the marks beside each set.
+      { cmd = "talisman list", kind = "sets", kinds = { tlist = true }, then_ = "allSets" },
       { cmd = "talisman pieces", kind = "pieces", then_ = "heldInfo" },
     }
     log("Scan started")
@@ -1327,7 +1361,14 @@ function M.scanHeard(cap)
   if scan.timer then pcall(killTimer, scan.timer); scan.timer = nil end
   scan.heard = scan.heard + 1
   local after = scan.step.then_
-  if after == "heldInfo" then
+  if after == "allSets" then
+    -- Before the INFO steps, which PIECES adds after this. Each SET records
+    -- its talismans and nothing more: INFO for every talisman of every set
+    -- would be hundreds of commands.
+    for _, kw in ipairs(M.data.setOrder) do
+      scan.queue[#scan.queue + 1] = { cmd = "talisman set " .. kw, kind = "set" }
+    end
+  elseif after == "heldInfo" then
     local todo = {}
     for _, tkw in ipairs(M.heldTalismans()) do
       if not M.data.talismans[tkw] then todo[#todo + 1] = tkw end
@@ -1504,6 +1545,10 @@ function M.diag()
   echo("  completed: " .. count(M.data.completed) .. " talismans\n")
   echo("  window:    " .. (M.data.shown and "shown" or "hidden") ..
        ", " .. (M.data.focus ~= "" and ("set " .. M.data.focus) or "all held") .. "\n")
+  local okCols, cols = pcall(getColumnCount, M.WINDOW)
+  echo("  width:     " .. M.width(M.WINDOW) .. " columns drawn; getColumnCount " ..
+       tostring(okCols and cols or "unavailable") .. ", cell " ..
+       tostring(M.cellWidth(M.WINDOW) or "unknown") .. " px\n")
   echo("  reading:   " .. (S.cap and (S.cap.kind .. (S.cap.paused and ", paged" or "")) or "nothing") ..
        "; " .. S.read .. " outputs read since start\n")
   echo("  scan:      " .. (S.scan and ((S.scan.step and S.scan.step.cmd or "between steps") ..

@@ -23,12 +23,18 @@ Under the pieces, the window lists every set with a mark for each of its
 talismans: done, started or not started. A set's name is a link that shows
 that set's talismans on their own, without the sets list; `[back to sets]`
 returns to everything. A talisman is marked done once `TALISMAN LIST` has
-been read, which `tals scan` sends; a set's talismans are marked once
-`TALISMAN SET <set>` has been read, which `tals scan <set>` sends.
+been read, and a set's talismans are marked once `TALISMAN SET <set>` has
+been read: `tals scan` sends both, SET for every set, and `tals scan <set>`
+sends SET for the one.
 
 The window lays itself out in as many columns as fit its width, and again
 when it is resized, so a wide window shows several talismans or sets side
-by side.
+by side. Mudlet's own column count for a window can be a few too many, since
+it divides by the font's average character width as a fraction while each
+character is drawn a whole number of pixels wide. So the package works out
+from it how many columns fit for certain, and may leave a column or two
+spare at the right rather than run past the edge. `tals diag` shows both
+numbers.
 
 ## How pieces are counted
 
@@ -61,7 +67,7 @@ closed until you ask for it again (`tals`, `tals show`, `tals set`).
 | `tals show` / `tals hide` | open or close the window |
 | `tals all` | list every talisman you hold pieces of |
 | `tals set <set>` | list one set's talismans instead |
-| `tals scan` | send `TALISMAN LIST` and `TALISMAN PIECES`, then `TALISMAN INFO` for each talisman you hold pieces of and have not read yet |
+| `tals scan` | send `TALISMAN LIST`, `TALISMAN PIECES` and `TALISMAN SET` for every set, then `TALISMAN INFO` for each talisman you hold pieces of and have not read yet |
 | `tals scan <set>` | send `TALISMAN SET <set>` and `TALISMAN PIECES`, then `TALISMAN INFO` for each of its talismans |
 | `tals stop` | stop a scan |
 | `tals diag` | the build stamp, what is stored, and where it is saved |

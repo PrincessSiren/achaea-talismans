@@ -55,6 +55,13 @@ function getColumnCount(name)
   if COLUMNS == nil then error("getColumnCount: bad argument #1 type (window name \"" .. tostring(name) .. "\" not found)") end
   return COLUMNS
 end
+-- calcFontSize(win, true) is 5.1's cell width; 5.0 raises for the flag.
+CELL, CALC_RAISES_ON_FLAG = nil, false
+function calcFontSize(win, average)
+  if CELL == nil then return nil end
+  if average and CALC_RAISES_ON_FLAG then error("calcFontSize: bad argument #1 type (font size as number expected, got string!)") end
+  return CELL, 16
+end
 function setWindowWrap(name, n) if name == AchaeaTalismans.WINDOW then WRAP = n end end
 function getMudletHomeDir() return "/profile" end
 function getEpoch() return CLOCK end
@@ -646,6 +653,28 @@ local drawn = #LINKS
 raise("sysUserWindowResizeEvent", 1600, 401, M.WINDOW)
 fireTimers()
 check(#LINKS == drawn, "a resize to the same width is not redrawn")
+-- With the cell width known, the width is what fits for certain. As seen
+-- live: getColumnCount said 72 of a window that showed 68 or 69 columns of
+-- 8-pixel cells, from a fractional average near 7.6.
+CELL = 8
+COLUMNS = 72
+check(M.width(M.WINDOW) == 67, "72 counted at an 8-pixel cell is 67 for certain, got " .. M.width(M.WINDOW))
+-- Every average that rounds to 8 and every window that rounds to 72 of it:
+-- the width given always fits in the cells drawn.
+for avg = 7.5, 8.49, 0.01 do
+  for px = (72 - 0.5) * avg, (72 + 0.49) * avg, 1 do
+    if math.floor(px / avg + 0.5) == 72 then
+      check(M.width(M.WINDOW) <= math.floor(px / 8), ("fits at average %.2f, %d px"):format(avg, px))
+    end
+  end
+end
+CALC_RAISES_ON_FLAG = true   -- 5.0: calcFontSize(win, true) raises
+CELL = 9                     -- and the "W" it falls back to
+check(M.width(M.WINDOW) == math.floor(71.5 * 8.5 / 9), "5.0 falls back to the width of a W")
+CALC_RAISES_ON_FLAG, CELL = false, nil
+check(M.width(M.WINDOW) == 71, "with no cell width, one column off, as before")
+M.diag()
+check(table.concat(ECHOED):find("getColumnCount 72", 1, true), "diag shows what Mudlet counted")
 COLUMNS = nil
 M.redraw()
 check(WRAP == M.DEFAULT_WIDTH, "a window that cannot be measured gets the default")
@@ -701,16 +730,31 @@ check(SENT[2] == "more", "a scan answers the pager for its own listing")
 check(SENT[3] == "talisman pieces", "then PIECES, once LIST's sets table is read")
 game(PIECES)
 check(SENT[4] == "more" and SENT[5] == "more" and SENT[6] == "more", "three pages")
-check(SENT[7] == "talisman info blackdragon", "then INFO for the first talisman held and not read")
+check(SENT[7] == "talisman set dragon", "then SET for every set LIST listed, in its order")
+local queued = { set = 0, info = 0 }
+local lastSet, firstInfo = 0, nil
+for i, step in ipairs(M.state.scan.queue) do
+  queued[step.kind] = queued[step.kind] + 1
+  if step.kind == "set" then lastSet = i elseif not firstInfo then firstInfo = i end
+end
+check(queued.set == #M.data.setOrder - 1 and #M.data.setOrder == 29, "all 29 sets, one sent and 28 to go")
+check(firstInfo and lastSet < firstInfo, "and every SET before the INFO steps")
+check(M.state.scan.queue[firstInfo].cmd == "talisman info blackdragon", "INFO for the first talisman held and not read")
+game(SET_DRAGON)
+check(SENT[8] == "talisman set azatlan", "a SET read, the next is sent")
+check(#M.data.sets.dragon.talismans == 6, "and the set's talismans are kept, for its marks")
+check(M.data.focus == "", "a full scan's SET does not turn the window to that set")
+while M.state.scan.step.kind == "set" do fireTimers() end
+check(SENT[#SENT] == "talisman info blackdragon", "the INFO steps come after the sets")
+local sentNow = #SENT
 game(INFO_RED)   -- not the one asked for: the scan keeps waiting
-check(#SENT == 7, "an answer to something else does not move the scan on")
+check(#SENT == sentNow, "an answer to something else does not move the scan on")
 fireTimers()
-check(SENT[8] == "talisman info golddragon", "a step not answered in time is skipped")
-local infos = 0
-for _, c in ipairs(SENT) do if c:find("^talisman info ") then infos = infos + 1 end end
+check(SENT[#SENT] == "talisman info golddragon", "a step not answered in time is skipped")
+sentNow = #SENT
 check(M.stopScan(true) and M.state.scan == nil, "stop")
 fireTimers()
-check(#SENT == 8, "a stopped scan sends nothing more")
+check(#SENT == sentNow, "a stopped scan sends nothing more")
 
 SENT = {}
 M.scan("dragon")
@@ -1035,7 +1079,7 @@ check(SENT[3] == "talisman pieces", "and the scan read it, and went on")
 local scanPieces = reply(PIECES):gsub("\nmore\n", "\n")
 shown = game(scanPieces)
 check(#shown == 0, "nor does PIECES, with its three pages, got " .. any(shown))
-check(#M.data.held > 0 and SENT[#SENT]:find("^talisman info "), "PIECES was read, and INFO is next")
+check(#M.data.held > 0 and SENT[#SENT] == "talisman set dragon", "PIECES was read, and the sets are next")
 M.stopScan(true)
 
 -- A set scan, to its end: SET, PIECES, then INFO for each of its six
