@@ -31,20 +31,27 @@ The window lays itself out in as many columns of talismans as fit its
 width, and again when it is resized, so a wide window shows several side by
 side. The sets are always two columns, each half the window, and a set
 with more marks than fit on its line wraps them onto the next, under its
-first marks. Docked under Mudlet's mapper, the window is as wide as the
-mapper. A window too narrow to show four marks a line in half of it lists
-the sets in one column. When the window is too short for all of it, it shows
-a scroll bar, which Mudlet otherwise leaves off a user window, so there is a
-sign of more above, and a last line, `↑ more above  [scan] [all]`, repeats
-the top's two links (in a set, `[scan set] [back to sets]`); when everything
-fits, both go. Like the columns,
-Mudlet's count of a window's lines can be a little high, so the package
-works out the lines that fit for certain. Mudlet's own column count for a window can be a few too many, since
-it divides by the font's average character width as a fraction while each
-character is drawn a whole number of pixels wide. So the package works out
-from it how many columns fit for certain, and may leave a column or two
-spare at the right rather than run past the edge. `tals diag` shows both
-numbers.
+first marks. A window too narrow to show four marks a line in half of it
+lists the sets in one column. Docked under Mudlet's mapper, the window is as
+wide as the mapper.
+
+When the window is too short for everything, it shows a scroll bar, which
+Mudlet otherwise leaves off a user window, and ends on a line that says so
+and repeats the top's two links:
+
+```
+↑ more above  [scan] [all]
+```
+
+In a set it is `[scan set] [back to sets]`. When everything fits, both go.
+
+Mudlet's own count of a window's columns and lines can be a little high: it
+divides by the font's average character width and line spacing as
+fractions, while each character is drawn in a cell a whole number of pixels
+wide and tall. So the package works out from those counts how many columns
+and lines fit for certain, and may leave a column or two spare at the right
+rather than run past the edge. `tals diag` shows the count and the width
+drawn.
 
 ## How pieces are counted
 
@@ -63,7 +70,9 @@ read. Until then, the window says `needs not read` where the bars would be.
 
 Build the package (see [Building](#building)), then drag
 `AchaeaTalismans.mpackage` into Mudlet, or install it from **Package
-Manager**. It is written for Mudlet 5.0 and later.
+Manager**. It is written for Mudlet 5.1 and later. On 5.0 it loads and reads,
+but it cannot ask how wide Mudlet draws a character, so the window's columns
+are not certain to fit and may run a column or two past its edge.
 
 The window opens docked on the right whenever the profile loads, unless you
 closed it with `tals hide`. Closing it with its own close button keeps it

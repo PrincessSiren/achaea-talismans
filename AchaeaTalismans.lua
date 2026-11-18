@@ -1186,15 +1186,14 @@ function M.render(width)
   return out
 end
 
---- The width in pixels of one character cell in a window. 5.1 says exactly,
---- with calcFontSize(win, true). 5.0 raises for that form, and its
---- calcFontSize(win) is the width of a "W", the nearest it has.
+--- The width in pixels of one character cell in a window, as Mudlet draws
+--- it: calcFontSize(win, true), new in 5.1. Nil before 5.1, which raises
+--- for that form; the width of a "W" that 5.0 offers instead is not the
+--- cell in a proportional font, and the package is written for 5.1.
 function M.cellWidth(win)
   if type(calcFontSize) ~= "function" then return nil end
-  for _, args in ipairs({ { win, true }, { win } }) do
-    local ok, w = pcall(calcFontSize, args[1], args[2])
-    if ok and type(w) == "number" and w > 0 then return w end
-  end
+  local ok, w = pcall(calcFontSize, win, true)
+  if ok and type(w) == "number" and w > 0 then return w end
   return nil
 end
 
@@ -1211,7 +1210,8 @@ end
 --- average is at least the cell less half a pixel. So (n - 0.5)(cell - 0.5)
 --- pixels are there for certain, which is that over the cell in columns. It
 --- may give up a column or two that would have fit; it never draws past the
---- edge. With no cell width to go on, one column comes off, as before.
+--- edge. With no cell width to go on (before 5.1), one column comes off,
+--- which is not certain to fit.
 ---
 --- The main console (nil) is drawn at the default, and so is a window not
 --- there yet, for which getColumnCount raises.
@@ -1479,6 +1479,8 @@ end
 function M.scanWaitsFor(cap)
   local step = S.scan and S.scan.step
   if not (step and step.kind == cap.kind) then return false end
+  -- A full scan's SET for some other set, typed meanwhile, is not the answer.
+  if step.setName then return (cap.name or ""):lower() == step.setName:lower() end
   -- INFO for some other talisman, typed meanwhile, is not the answer.
   return not step.kw or cap.kw == step.kw
 end
@@ -1494,8 +1496,14 @@ function M.scanHeard(cap)
     -- Before the INFO steps, which PIECES adds after this. Each SET records
     -- its talismans and nothing more: INFO for every talisman of every set
     -- would be hundreds of commands.
+    -- Each waits for its own set, by the name SETS gave it, which SET's
+    -- "Name:" line repeats: a SET typed meanwhile for another set is not the
+    -- answer, and would put every step after it one answer behind. The name
+    -- rather than the keyword, which SET prints as "Partial name" and which
+    -- is only known to match for the sets captured.
     for _, kw in ipairs(M.data.setOrder) do
-      scan.queue[#scan.queue + 1] = { cmd = "talisman set " .. kw, kind = "set" }
+      local set = M.data.sets[kw]
+      scan.queue[#scan.queue + 1] = { cmd = "talisman set " .. kw, kind = "set", setName = set and set.name }
     end
   elseif after == "heldInfo" then
     local todo = {}

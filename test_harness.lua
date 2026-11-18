@@ -743,8 +743,8 @@ for avg = 7.5, 8.49, 0.01 do
   end
 end
 CALC_RAISES_ON_FLAG = true   -- 5.0: calcFontSize(win, true) raises
-CELL = 9                     -- and the "W" it falls back to
-check(M.width(M.WINDOW) == math.floor(71.5 * 8.5 / 9), "5.0 falls back to the width of a W")
+CELL = 9                     -- and calcFontSize(win) is a "W", not the cell
+check(M.width(M.WINDOW) == 71, "before 5.1, no cell width: one column off, not the W")
 CALC_RAISES_ON_FLAG, CELL = false, nil
 check(M.width(M.WINDOW) == 71, "with no cell width, one column off, as before")
 M.diag()
@@ -818,7 +818,34 @@ game(SET_DRAGON)
 check(SENT[8] == "talisman set azatlan", "a SET read, the next is sent")
 check(#M.data.sets.dragon.talismans == 6, "and the set's talismans are kept, for its marks")
 check(M.data.focus == "", "a full scan's SET does not turn the window to that set")
-while M.state.scan.step.kind == "set" do fireTimers() end
+-- A SET in the game's shape for a set SETS listed, one made-up talisman.
+local function setReply(kw)
+  local name = M.data.sets[kw].name
+  return table.concat({
+    "Name: " .. name, "Partial name: " .. kw,
+    "Description: A set made up for the test.", "Talismans:",
+    "a " .. name .. " Talisman (" .. kw .. "one)", PROMPT,
+  }, "\n")
+end
+-- A SET typed for another set while the scan waits on Azatlan is not its
+-- answer, and is shown but for its Name: line.
+local waiting = #SENT
+local typedSet = setReply("war")
+local shownSet = game(typedSet)
+check(#SENT == waiting and M.state.scan.step.cmd == "talisman set azatlan",
+      "a SET for another set does not answer the scan's")
+check(#shownSet == select(2, typedSet:gsub("\n", "")) and shownSet[1] == "Partial name: war",
+      "and is shown, but for its Name: line")
+-- Every set answered in turn, each hidden, and the scan goes through all.
+local answered = 0
+while M.state.scan.step.kind == "set" do
+  local kw = M.state.scan.step.cmd:match("^talisman set (%S+)$")
+  local left = game(setReply(kw))
+  check(#left == 0, "SET " .. kw .. " in a full scan leaves nothing on the screen, got " .. table.concat(left, " / "))
+  answered = answered + 1
+end
+check(answered == 28, "all 28 sets after Dragon answered, got " .. answered)
+check(M.data.sets.empires.talismans[1].kw == "empiresone", "and kept")
 check(SENT[#SENT] == "talisman info blackdragon", "the INFO steps come after the sets")
 local sentNow = #SENT
 game(INFO_RED)   -- not the one asked for: the scan keeps waiting
