@@ -99,6 +99,14 @@ local function fireTimers()
   for _, fn in pairs(due) do fn() end
 end
 
+-- The main window's last line, as getLines reports it; nil for unknown.
+local LAST_LINE = nil
+function getLineCount() return 41 end
+function getLines(from, to)
+  assert(from == 41 and to == 42, "the last line alone")
+  return { LAST_LINE }
+end
+
 -- deleteLine takes the line the trigger fired on off the screen.
 local DELETED = false
 function deleteLine() DELETED = true end
@@ -1044,7 +1052,11 @@ end
 check(M.state.scan == nil, "the set scan finished")
 check(not table.concat(ECHOED, "\n"):find("Scan completed", 1, true),
       "the closing line waits for the trigger to finish, not to go out with its line")
+LAST_LINE = ""   -- what the hidden lines left: an empty line to write on
 fireTimers()
+LAST_LINE = nil
+check(ECHOED[#ECHOED]:find("^<gold>%[tals%]<reset> Scan completed"),
+      "written on the empty line, with no blank line above it: " .. ECHOED[#ECHOED])
 local said = table.concat(ECHOED, "\n")
 check(said:find("[tals]<reset> Scan started (set dragon)", 1, true), "a scan says it started")
 check(said:find("[tals]<reset> Scan completed (", 1, true) and said:find(" found for Dragon)", 1, true),
@@ -1070,7 +1082,10 @@ game(reply(SET_DRAGON))
 fireTimers()   -- blackdragon: no answer
 for i = 2, #dragons do game(infoFor(dragons[i])) end
 check(M.state.scan == nil, "the scan finished past the missed step")
+LAST_LINE = "Some line still on the screen"
 fireTimers()
+LAST_LINE = nil
+check(ECHOED[#ECHOED]:find("^\n<gold>%[tals%]"), "after a line with text on it, a line of its own")
 said = table.concat(ECHOED, "\n")
 check(said:find("Scan completed (1 piece found for Dragon). <red>Not answered: talisman info blackdragon<reset>", 1, true),
       "the closing line names what went unanswered, got " .. said)

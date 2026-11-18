@@ -112,7 +112,11 @@ local function log(message, colour)
   -- does, takes the message with it. From a trigger it is printed once the
   -- trigger is done, on a line of its own.
   if S.inFeed then
-    tempTimer(0, function() cecho(text) end)
+    tempTimer(0, function()
+      -- By then the lines a scan hid are gone, and the window may already
+      -- end on an empty line: the leading newline would add a blank one.
+      cecho(M.lastLineEmpty() and text:sub(2) or text)
+    end)
   else
     cecho(text)
   end
@@ -124,6 +128,18 @@ function M.now()
     if ok and type(t) == "number" then return t end
   end
   return os.time()
+end
+
+--- Whether the main window's last line is empty. getLineCount is the last
+--- line's index and getLines(from, to) stops short of `to`, both in 5.0.1
+--- and 5.1.0, so this is that line alone.
+function M.lastLineEmpty()
+  if type(getLineCount) ~= "function" or type(getLines) ~= "function" then return false end
+  local ok, last = pcall(function()
+    local n = getLineCount()
+    return getLines(n, n + 1)[1]
+  end)
+  return ok and last == ""
 end
 
 -- ---------------------------------------------------------- saving, loading
