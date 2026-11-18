@@ -99,15 +99,40 @@ local function fireTimers()
   for _, fn in pairs(due) do fn() end
 end
 
+-- The main window's last line, as getLines reports it; nil for unknown.
+local LAST_LINE = nil
+function getLineCount() return 41 end
+function getLines(from, to)
+  assert(from == 41 and to == 42, "the last line alone")
+  return { LAST_LINE }
+end
+
+-- deleteLine takes the line the trigger fired on off the screen.
+local DELETED = false
+function deleteLine() DELETED = true end
+-- Mudlet knows a prompt by the game's GA. Here, by the prompt's own shape.
+function isPrompt() return line ~= nil and line:find("^H:%d+|") ~= nil end
+
 -- What the live trigger does with a line: its pattern is "^", so every line.
+-- Returns the lines left on the screen. As in Mudlet 5.1, what a trigger
+-- echoes goes into its line, so a line deleted takes its echoes with it.
 local function game(text)
+  local shown = {}
   for l in (text .. "\n"):gmatch("(.-)\n") do
+    DELETED = false
+    local echoedBefore = #ECHOED
     for _, t in pairs(TRIGGERS) do
       assert(t.re == "^", "the one trigger matches every line")
       line = l
       t.fn()
     end
+    if DELETED then
+      for i = #ECHOED, echoedBefore + 1, -1 do ECHOED[i] = nil end
+    else
+      shown[#shown + 1] = l
+    end
   end
+  return shown
 end
 
 local passed = 0
@@ -691,7 +716,8 @@ SENT = {}
 M.scan("dragon")
 check(SENT[1] == "talisman set dragon", "a set scan starts with SET")
 game(SET_DRAGON)
-check(SENT[2] == "talisman info blackdragon", "then INFO for each of its talismans")
+check(SENT[2] == "talisman pieces", "then PIECES, so what it counts is what it read")
+check(M.state.scan.queue[1].cmd == "talisman info blackdragon", "then INFO for each of its talismans")
 check(M.data.focus == "dragon", "and the window turns to it")
 M.stopScan(true)
 
@@ -988,6 +1014,189 @@ load()
 M = AchaeaTalismans
 check(M.state.loaded == "unreadable" and #M.data.held == 0, "an unreadable file starts empty")
 RAISE_ON_LOAD, STORED = false, nil
+
+-- ------------------------------------------------------- a scan is silent
+
+-- What the game prints for a command the scan sent: the listing as captured,
+-- without the line it was typed on, which was the prompt before it.
+local function reply(text) return (text:gsub("^[^\n]*\n", "")) end
+local function infoFor(kw) return reply(INFO_RED):gsub("reddragon", kw) end
+local function any(shown) return #shown == 0 and "nothing" or table.concat(shown, " / ") end
+
+M.stopScan(true)
+M.data.talismans = {}
+SENT, ECHOED = {}, {}
+M.scan()
+local shown = game(reply(LIST))
+check(#shown == 0, "LIST answered to a scan leaves nothing on the screen, got " .. any(shown))
+check(SENT[3] == "talisman pieces", "and the scan read it, and went on")
+-- In a scan, MORE is sent once per page: the second `more` typed by hand in
+-- the capture is not the scan's.
+local scanPieces = reply(PIECES):gsub("\nmore\n", "\n")
+shown = game(scanPieces)
+check(#shown == 0, "nor does PIECES, with its three pages, got " .. any(shown))
+check(#M.data.held > 0 and SENT[#SENT]:find("^talisman info "), "PIECES was read, and INFO is next")
+M.stopScan(true)
+
+-- A set scan, to its end: SET, PIECES, then INFO for each of its six
+-- talismans. Nothing held beforehand: the count is what PIECES says.
+SENT, ECHOED = {}, {}
+M.data.talismans = {}
+M.data.held = {}
+M.scan("dragon")
+shown = game(reply(SET_DRAGON))
+check(#shown == 0, "SET answered to a scan leaves nothing, got " .. any(shown))
+check(SENT[#SENT] == "talisman pieces", "a set scan reads PIECES")
+shown = game(scanPieces)
+check(#shown == 0, "PIECES in a set scan leaves nothing, got " .. any(shown))
+local dragons = { "blackdragon", "golddragon", "bluedragon", "silverdragon", "greendragon", "reddragon" }
+for i, kw in ipairs(dragons) do
+  check(SENT[#SENT] == "talisman info " .. kw, "the scan asks for " .. kw)
+  shown = game(infoFor(kw))
+  check(#shown == 0, "INFO " .. kw .. " leaves nothing, got " .. any(shown))
+end
+check(M.state.scan == nil, "the set scan finished")
+check(not table.concat(ECHOED, "\n"):find("Scan completed", 1, true),
+      "the closing line waits for the trigger to finish, not to go out with its line")
+LAST_LINE = ""   -- what the hidden lines left: an empty line to write on
+fireTimers()
+LAST_LINE = nil
+check(ECHOED[#ECHOED]:find("^<gold>%[tals%]<reset> Scan completed"),
+      "written on the empty line, with no blank line above it: " .. ECHOED[#ECHOED])
+local said = table.concat(ECHOED, "\n")
+check(said:find("[tals]<reset> Scan started (set dragon)", 1, true), "a scan says it started")
+-- The made-up PIECES holds 17 dragon pieces: black 4, gold 3, silver 6,
+-- green 1, red 3.
+check(said:find("[tals]<reset> Scan completed (17 pieces found for Dragon)", 1, true),
+      "and that it finished, with the pieces it read toward the set: " .. said)
+check(not said:find("Not answered", 1, true), "every step answered, so nothing is listed as missed")
+local _, lines = said:gsub("%[tals%]", "")
+check(lines == 2, "two lines, and no more, got " .. lines)
+
+-- The pieces found are counted as the game lists them, one per piece.
+M.data.held = {
+  { kw = "reddragonclaw", count = 2, level = 3, group = "reddragon" },
+  { kw = "brothspice", count = 1, level = 1, group = "ogrebroth" },
+}
+check(M.piecesHeld() == 3, "three pieces held in all")
+check(M.piecesHeld("dragon") == 2, "two of them toward the Dragon set")
+check(M.scanSummary({ unanswered = {} }) == "Scan completed (3 pieces found)", "the summary of a full scan")
+
+-- A step the game never answered is named on the closing line.
+ECHOED = {}
+M.scan("dragon")
+game(reply(SET_DRAGON))
+game(scanPieces)
+fireTimers()   -- blackdragon: no answer
+for i = 2, #dragons do game(infoFor(dragons[i])) end
+check(M.state.scan == nil, "the scan finished past the missed step")
+LAST_LINE = "Some line still on the screen"
+fireTimers()
+LAST_LINE = nil
+check(ECHOED[#ECHOED]:find("^\n<gold>%[tals%]"), "after a line with text on it, a line of its own")
+said = table.concat(ECHOED, "\n")
+check(said:find("Scan completed (17 pieces found for Dragon). <red>Not answered: talisman info blackdragon<reset>", 1, true),
+      "the closing line names what went unanswered, got " .. said)
+
+-- Incomplete talismans come after LIST's sets table, by when the scan has
+-- moved on to PIECES; they are still LIST's, and hidden with it.
+M.data.talismans = {}
+M.scan()
+local incomplete = "Name                                          Set       Keyword             \n" ..
+  RULE79 .. "\na miniature Water Elemental                   elemental waterelemental\n" .. RULE79
+local withIncomplete = reply(LIST):gsub("You have no incomplete talismans to show%.", function() return incomplete end)
+check(withIncomplete:find("Water Elemental", 1, true), "the incomplete table is in")
+shown = game(withIncomplete)
+check(#shown == 0, "a table after LIST's sets table is hidden with it, got " .. any(shown))
+check(M.state.scan.step.kind == "pieces", "the scan had moved on before it")
+M.stopScan(true)
+
+-- What the package cannot place in a scan's listing stays on the screen.
+local TELL = "Somebody tells you, \"hello there friend.\""
+M.data.talismans = {}
+M.scan()
+local withTell = reply(LIST):gsub("(Wonders%s+0/6%s+wonders\n)", "%1" .. TELL .. "\n")
+check(withTell:find(TELL, 1, true), "the tell is in")
+shown = game(withTell)
+check(#shown == 1 and shown[1] == TELL, "a tell in the middle of a scan's table is shown, and only it, got " .. any(shown))
+M.stopScan(true)
+
+-- An answer the package does not read is shown, so a skipped step says why.
+M.scan("dragon")
+shown = game("There is no such talisman set.\n" .. PROMPT)
+check(#shown == 2, "an answer it cannot read is left, with its prompt")
+M.stopScan(true)
+
+-- A help scroll paged mid-scan is not the scan's, and is left to the player.
+M.scan()
+shown = game("HELP TALISMANS\n[Type MORE if you wish to continue reading. (10% shown)]\n" .. PROMPT)
+check(#shown == 3, "a page break the scan does not answer is shown")
+M.stopScan(true)
+
+-- What you type yourself is shown in full, scan or none.
+shown = game(SETS)
+local lineCount = select(2, SETS:gsub("\n", "")) + 1
+check(#shown == lineCount, "a typed SETS is shown, every line")
+M.scan("dragon")
+shown = game(SETS)
+check(#shown == lineCount, "and still while a scan waits on something else")
+M.stopScan(true)
+
+-- A scan's tail ends at its prompt, or, with no prompt marked, soon after:
+-- a listing typed then is not taken for the scan's.
+M.scan("dragon")
+local noPrompt = reply(SET_DRAGON):gsub("\n" .. PROMPT:gsub("%p", "%%%0") .. "$", "\n")
+game(noPrompt)
+M.stopScan(true)
+CLOCK = CLOCK + M.TAIL_WAIT + 1
+shown = game(SETS)
+check(#shown == lineCount, "a tail no prompt closed is let go")
+
+-- One scan at a time: a second, or a double click on [scan], sends nothing.
+SENT, ECHOED = {}, {}
+check(M.scan() == true and #SENT == 1, "a scan starts")
+check(M.scan("dragon") == false and #SENT == 1, "a second, while it runs, does not")
+check(table.concat(ECHOED, "\n"):find("already running", 1, true), "and says why")
+M.stopScan(true)
+
+-- A page break the scan answered, and never saw continued: once the scan
+-- gives up on the step, or is stopped, the prompts after are shown again.
+local listUpToBreak = reply(LIST):match("^(.-%[Type MORE[^\n]*)\n")
+check(listUpToBreak, "LIST up to its page break")
+M.scan()
+game(listUpToBreak)
+check(M.state.answered, "the scan answered the break")
+fireTimers()   -- no [File continued via MORE]: the step times out
+shown = game(PROMPT)
+check(#shown == 1, "a prompt after a step given up on is shown")
+M.stopScan(true)
+M.scan()
+game(listUpToBreak)
+M.stopScan(true)
+shown = game(PROMPT)
+check(#shown == 1, "and after a stop")
+game("[File continued via MORE]")
+
+-- INFO or SET the scan did not ask for, typed while it waits on another, is
+-- shown, all but its "Name:" line, which is hidden before the line saying
+-- which listing it is. The scan goes on waiting.
+M.data.talismans = {}
+M.scan("dragon")
+game(reply(SET_DRAGON))
+game(scanPieces)
+check(SENT[#SENT] == "talisman info blackdragon", "the scan waits on blackdragon")
+local sentNow = #SENT
+local typed = infoFor("reddragon")
+local typedLines = select(2, typed:gsub("\n", "")) + 1
+shown = game(typed)
+check(#shown == typedLines - 1 and shown[1] == "Keyword: reddragon",
+      "INFO for another talisman is shown but for its Name: line, got " .. any(shown))
+check(#SENT == sentNow and M.state.scan.step.kw == "blackdragon", "and the scan still waits")
+shown = game(reply(SET_DRAGON))
+check(#shown == select(2, reply(SET_DRAGON):gsub("\n", "")), "a SET typed meanwhile is shown, but for its Name: line")
+shown = game(infoFor("blackdragon"))
+check(#shown == 0, "the one it waits for is still hidden")
+M.stopScan(true)
 
 -- -------------------------------------------------------------- uninstall
 

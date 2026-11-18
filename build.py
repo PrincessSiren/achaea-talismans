@@ -53,7 +53,7 @@ HELP_URL = SOURCE_URL
 # repository requires and its validator greps for. A constant rather than
 # today's date, because both build artefacts are byte-reproducible. Move it
 # when the version moves.
-CREATED = "2026-11-16"
+CREATED = "2026-11-17"
 LUA = HERE / "AchaeaTalismans.lua"
 XML = HERE / "AchaeaTalismans.xml"
 MPACKAGE = HERE / "AchaeaTalismans.mpackage"
@@ -108,7 +108,7 @@ ALIASES: list[tuple[str, str, str, str, str]] = [
         r"^tals\s+scan\s+(\S+)$",
         "AchaeaTalismans.scan(matches[2])",
         "tals scan <set>",
-        "send TALISMAN SET <set>, then INFO for each of its talismans",
+        "send TALISMAN SET <set> and PIECES, then INFO for each of its talismans",
     ),
     (
         "stop",
