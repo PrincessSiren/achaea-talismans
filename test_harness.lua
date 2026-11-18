@@ -597,7 +597,69 @@ check(sideBySide(shown(60), "Dragon ", "yggdrasil"), "and two of sets")
 check(across(shown(200)) >= 3, "a wide one has several of talismans, got " .. across(shown(200)))
 check(not shown(200):find("\n\n\n", 1, true) and not shown(60):find("\n\n\n", 1, true),
       "an open talisman's blank line is never two, nor at a column's foot")
-check(#lines(shown(200)) < #lines(shown(60)) / 2, "and is less than half as tall")
+check(#lines(shown(200)) < #lines(shown(60)), "and is shorter")
+
+-- The sets: two columns, whatever the width, and a set's marks wrap within
+-- its column under the first of them. Marks, with 19 talismans, is the
+-- longest set in the game.
+do
+  local real = M.data.sets.marks.talismans
+  local nineteen = {}
+  for i = 1, 19 do nineteen[i] = { name = "mark " .. i, kw = "mark" .. i } end
+  local others = {}
+  for kw, set in pairs(M.data.sets) do others[kw] = set.talismans; set.talismans = nil end
+  M.data.sets.marks.talismans = nineteen
+  local function setLines(width)
+    local text = shown(width)
+    return lines(text:sub((text:find("Sets", 1, true))))
+  end
+  local function plain(l) return (l:gsub("<[%w_,:]+>", "")) end
+  -- Two sets on one line: two counts, as "0/19".
+  local function twoAcross(ls)
+    for _, l in ipairs(ls) do
+      if select(2, plain(l):gsub("%d+/%d+", "")) >= 2 then return true end
+    end
+    return false
+  end
+  for _, width in ipairs({ 51, 67, 80, 120, 200 }) do
+    local ls = setLines(width)
+    local widest, marksAt, wrapped = 0, nil, nil
+    for i, l in ipairs(ls) do
+      widest = math.max(widest, M.textWidth(l))
+      if plain(l):find("^Marks ") then marksAt = i end
+    end
+    check(widest <= width, "the sets fit " .. width .. " columns, got " .. widest)
+    check(marksAt, "Marks is listed at " .. width)
+    check(twoAcross(ls), "two columns of sets at " .. width)
+    -- Marks is the only set with marks here, so every circle is its own.
+    local lead = #"Miscellaneous" + 1 + 5 + 1
+    local colW = math.floor((width - M.GAP) / 2)
+    local perLine = colW - lead
+    local function circles(l) return select(2, plain(l):gsub("○", "")) end
+    check(circles(ls[marksAt]) == math.min(19, perLine),
+          ("Marks shows %d marks on its first line at %d, got %d"):format(math.min(19, perLine), width, circles(ls[marksAt])))
+    local total, i = 0, marksAt
+    while ls[i] and circles(ls[i]) > 0 do
+      total = total + circles(ls[i])
+      if i > marksAt then
+        check(plain(ls[i]):find(string.rep(" ", lead) .. "○", 1, true), "the rest wrap under the first mark at " .. width)
+      end
+      i = i + 1
+    end
+    check(total == 19, "all 19 marks shown at " .. width .. ", got " .. total)
+  end
+  -- The live window: 67 columns, two of sets, 12 marks a line.
+  local ls = setLines(67)
+  local twoLines = 0
+  for i, l in ipairs(ls) do if plain(l):find("^Marks ") then twoLines = i end end
+  check(select(2, plain(ls[twoLines]):gsub("○", "")) >= 12, "at 67 Marks' first line holds 12")
+  -- Too narrow for two columns with marks: one column, of the full width.
+  local narrow = setLines(40)
+  check(not twoAcross(narrow), "one column of sets at 40")
+  for _, l in ipairs(narrow) do check(M.textWidth(l) <= 40, "and it fits") end
+  for kw, set in pairs(M.data.sets) do set.talismans = others[kw] end
+  M.data.sets.marks.talismans = real
+end
 check(not shown(80):find(" \n"), "no line ends in padding")
 check(shown(1):find("22/64", 1, true), "a window narrower than anything is one column")
 check(#M.layout({}, 80, 1) == 0, "nothing to lay out is no columns")

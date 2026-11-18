@@ -27,9 +27,13 @@ been read, and a set's talismans are marked once `TALISMAN SET <set>` has
 been read: `tals scan` sends both, SET for every set, and `tals scan <set>`
 sends SET for the one.
 
-The window lays itself out in as many columns as fit its width, and again
-when it is resized, so a wide window shows several talismans or sets side
-by side. Mudlet's own column count for a window can be a few too many, since
+The window lays itself out in as many columns of talismans as fit its
+width, and again when it is resized, so a wide window shows several side by
+side. The sets are always two columns, each half the window, and a set
+with more marks than fit on its line wraps them onto the next, under its
+first marks. Docked under Mudlet's mapper, the window is as wide as the
+mapper. A window too narrow to show four marks a line in half of it lists
+the sets in one column. Mudlet's own column count for a window can be a few too many, since
 it divides by the font's average character width as a fraction while each
 character is drawn a whole number of pixels wide. So the package works out
 from it how many columns fit for certain, and may leave a column or two

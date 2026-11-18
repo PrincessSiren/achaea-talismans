@@ -838,6 +838,8 @@ end
 M.BAR = 10
 -- Spaces between two columns of the layout.
 M.GAP = 3
+-- The fewest marks a line of a set may hold before the sets go to one column.
+M.MIN_MARKS = 4
 -- The width drawn to when the window cannot be measured.
 M.DEFAULT_WIDTH = 80
 local MARK = { done = "<green>●", started = "<yellow>◐", none = "<dim_grey>○" }
@@ -922,6 +924,22 @@ function M.layout(blocks, width, sep)
     local w = M.GAP * (#cols - 1)
     for _, col in ipairs(cols) do w = w + col.w end
     if w <= width then return cols end
+  end
+  return stack(blocks, total, sep)
+end
+
+--- Lay blocks out in at most n columns read top to bottom, as short as that
+--- allows. Blocks are never split, so a column may come out a line longer
+--- than the other.
+function M.layoutInto(blocks, n, sep)
+  local tallest, total = 0, 0
+  for i, b in ipairs(blocks) do
+    if #b > tallest then tallest = #b end
+    total = total + #b + (i > 1 and gapAfter(blocks[i - 1], sep) or 0)
+  end
+  for height = tallest, total do
+    local cols = stack(blocks, height, sep)
+    if #cols <= n then return cols end
   end
   return stack(blocks, total, sep)
 end
@@ -1128,21 +1146,40 @@ function M.render(width)
     add("\n<white>Sets<reset>  <dim_grey>click one to list its talismans\n")
     local nw = 1
     for _, kw in ipairs(d.setOrder) do nw = math.max(nw, #(d.sets[kw].name or kw)) end
-    local rows = {}
+    -- Two columns, each half the window, and a set's marks wrap within its
+    -- column, under the first of them, rather than widen it: the longest
+    -- set has 19 talismans, and one wide row would make every row in its
+    -- column as wide. A window too narrow to show a few marks a line in
+    -- half of it gets one column of its full width instead.
+    local lead = nw + 1 + 5 + 1   -- name, a space, the counts padded, a space
+    local columns, colW = 2, math.floor((width - M.GAP) / 2)
+    if colW - lead < M.MIN_MARKS then columns, colW = 1, width end
+    local perLine = math.max(1, colW - lead)
+    local blocks = {}
     for _, kw in ipairs(d.setOrder) do
       local set = d.sets[kw]
       local line = putLink(newLine(), "<reset>" .. pad(set.name or kw, nw), "AchaeaTalismans.setFocus(" .. q(kw) .. ")",
         "list the " .. (set.name or kw) .. " set")
       -- A set read by TALISMAN SET alone has no counts yet.
       local counts = set.total and (fmt(set.done or 0) .. "/" .. fmt(set.total)) or "?"
-      local marks = " <dim_grey>" .. counts
+      local block = {}
       if set.talismans then
-        marks = " <dim_grey>" .. pad(counts, 5) .. " "
-        for _, t in ipairs(set.talismans) do marks = marks .. MARK[M.status(t.kw)] end
+        put(line, " <dim_grey>" .. pad(counts, 5) .. " ")
+        local marks = {}
+        for _, t in ipairs(set.talismans) do marks[#marks + 1] = MARK[M.status(t.kw)] end
+        local i = 1
+        repeat
+          put(line, table.concat(marks, "", i, math.min(#marks, i + perLine - 1)))
+          i = i + perLine
+          block[#block + 1] = line
+          if i <= #marks then line = put(newLine(), string.rep(" ", lead)) end
+        until i > #marks
+      else
+        block[1] = put(line, " <dim_grey>" .. counts)
       end
-      rows[#rows + 1] = { put(line, marks) }
+      blocks[#blocks + 1] = block
     end
-    M.emit(out, M.layout(rows, width, 0))
+    M.emit(out, M.layoutInto(blocks, columns, 0))
   else
     add("\n<dim_grey>Sets not read yet. TALISMAN SETS, or [scan].\n")
   end
