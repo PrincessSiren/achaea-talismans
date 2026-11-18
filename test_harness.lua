@@ -1467,8 +1467,9 @@ check(#shown == 1 and shown[1] == TELL, "a tell in the middle of a scan's table 
 M.stopScan(true, true)
 
 -- An answer the package does not read is shown, so a skipped step says why.
+-- The game's answer to SET for a set that does not exist (2026-11-18).
 M.scan("dragon")
-shown = game("There is no such talisman set.\n" .. PROMPT)
+shown = game("That is not a valid set.\n" .. PROMPT)
 check(#shown == 2, "an answer it cannot read is left, with its prompt")
 M.stopScan(true, true)
 
