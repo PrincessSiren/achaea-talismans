@@ -926,6 +926,24 @@ ECHOED = {}
 check(M.stopScan() == false and M.state.scan == nil, "a stop with no scan stops nothing")
 check(table.concat(ECHOED, "\n"):find("No scan running", 1, true), "and says there is none")
 
+-- A scan that ends on a step given up on lets go of a table it had begun:
+-- the game stopped mid-PIECES, say. Lines shaped like that table's rows,
+-- arriving later, are not hidden as if they were the rest of it.
+M.scan("dragon")
+game(SET_DRAGON)
+check(M.state.scan.step.kind == "pieces", "a set scan waits on PIECES")
+M.stopScan(true)   -- so PIECES is its last step
+local piecesLines = lines((PIECES:gsub("^[^\n]*\n", "")))
+local cutOff = game(table.concat(piecesLines, "\n", 1, 4))
+check(#cutOff == 0, "PIECES begun after the stop is hidden")
+check(M.state.cap and M.state.cap.hide, "and left half read")
+fireTimers()   -- the rest never comes
+check(M.state.scan == nil, "the scan gives up on it and ends")
+local rowLike = game(piecesLines[5])
+check(#rowLike == 1, "a line shaped like its rows is then shown, got " .. table.concat(rowLike, " / "))
+M.state.cap = nil   -- as the next listing's header would
+M.data.focus = ""   -- the set scan turned the window to Dragon
+
 -- A new scan waits for a stopped one's last answer: that answer, LIST
 -- here, is the kind the new scan's first step asks for, and would be taken
 -- for the new scan's own, leaving the real one on the screen.
