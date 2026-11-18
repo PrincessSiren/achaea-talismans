@@ -111,8 +111,9 @@ commit on `main`. Write them for someone reading the log a year from now.
 
 ## Releasing
 
-Pushing a tag `v<version>` is what ships. `release.yml` runs the harness,
-refuses a tag whose number `M.VERSION` does not claim, builds the `.mpackage`
+Pushing a tag `v<version>` is what ships. `release.yml` refuses a tag on a
+commit `main` does not contain, runs the harness, refuses a tag whose number
+`M.VERSION` does not claim, builds the `.mpackage`
 from that tag, checks the committed `.xml` matches it, and attaches it to the
 release.
 
