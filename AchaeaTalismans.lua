@@ -28,7 +28,8 @@ a window from it:
 Nothing has to be typed differently: the package reads those whenever they
 are typed, by you or by `tals scan`. Reading is all it does unless asked to
 scan, and a scan sends only TALISMAN commands, plus MORE while the listing it
-is waiting for is paged.
+is waiting for is paged. What a scan is answered with is read and kept off
+the screen: the window is where it shows.
 
 The arithmetic is HELP TALISMANS (19.24): "Two Pieces of the same level may be
 combined into a Piece of one level higher", and split back down. So a piece at
@@ -53,7 +54,7 @@ COMBINE and SPLIT commands that get it there are still yours to type.
 AchaeaTalismans = AchaeaTalismans or {}
 local M = AchaeaTalismans
 
-M.VERSION = "0.2.0"
+M.VERSION = "0.3.0"
 M.BUILD = M.BUILD or "source"   -- build.py replaces this
 
 -- The name Mudlet knows the package by, which is what its uninstall event
@@ -97,6 +98,8 @@ M.state = M.state or {
   handlers = {},
   cap      = nil,   -- the output being read, if any
   scan     = nil,   -- the scan in progress, if any
+  answered = false, -- the scan answered the page break now showing
+  tailUntil = 0,    -- until when the lines after a scan's listing are its own
   loaded   = "none",
   read     = 0,     -- outputs read since the package started
 }
@@ -205,6 +208,15 @@ M.MORE_CLOSE = "^%[File continued via MORE%]"
 -- A paged table nobody went on reading is let go after this long, so that a
 -- later MORE for something else does not feed that something to it.
 M.PAUSE_MAX = 300
+-- What a scan's listing may still print after its table or its last row,
+-- before the prompt that ends it, besides blank lines and another table.
+M.TAIL_LINES = {
+  "^You have no incomplete talismans to show%.$",   -- TALISMAN LIST
+}
+-- The rest of a listing comes with it, in the same packet or the next. A
+-- tail never closed by a prompt (a client that does not mark prompts) is let
+-- go after this long, so it cannot hide a listing typed later.
+M.TAIL_WAIT = 1
 
 -- B 1   a Black Dragon's heart            1     Dragon     blackdragonheart
 -- The name column is cut at 33 characters, so the name is taken as whatever
@@ -275,7 +287,9 @@ local function tableReader(onRow)
     end
     -- Before the opening rule nothing else is expected.
     if cap.rules == 0 then return "drop" end
-    onRow(cap, l)
+    -- A line inside the table that is neither a row nor a heading, a tell
+    -- above all, is taken so the table goes on, but is not the table's.
+    cap.foreign = not onRow(cap, l)
     return nil
   end
 end
@@ -287,14 +301,16 @@ READ.pieces = tableReader(function(cap, l)
       source = src, count = tonumber(n), name = trim(name),
       level = tonumber(level), set = set, kw = kw, group = cap.group,
     }
-    return
+    return true
   end
   local heading = l:match(M.ROW_GROUP)
   if heading then
     -- The heading is the talisman's keyword with "pieces" on the end, as far
     -- as the six dragons show; the others are read the same way.
     cap.group = heading:gsub("pieces$", "")
+    return true
   end
+  return false
 end)
 
 READ.tpieces = tableReader(function(cap, l)
@@ -304,14 +320,18 @@ READ.tpieces = tableReader(function(cap, l)
       source = src, count = tonumber(n), name = trim(name),
       level = tonumber(level), set = set, kw = kw,
     }
+    return true
   end
+  return false
 end)
 
 READ.tlist = tableReader(function(cap, l)
   local name, set, kw = l:match(M.ROW_TLIST)
   if name and name ~= "" and inColumn(cap, l, kw) then
     cap.rows[#cap.rows + 1] = { name = trim(name), set = set, kw = kw }
+    return true
   end
+  return false
 end)
 
 READ.sets = tableReader(function(cap, l)
@@ -320,7 +340,9 @@ READ.sets = tableReader(function(cap, l)
     cap.rows[#cap.rows + 1] = {
       name = trim(name), done = tonumber(done), total = tonumber(total), kw = kw,
     }
+    return true
   end
+  return false
 end)
 
 -- The line after "Name:" decides between a set and a talisman.
@@ -572,6 +594,9 @@ local function open(l)
     S.cap = { kind = kind, rules = 0, rows = {}, kwCol = l:find("Keyword", 1, true) }
   end
   S.cap.fromScan = scanWants(kind)
+  -- Hidden: the scan's own, or a table that follows one of the scan's in the
+  -- same output, as LIST's incomplete talismans follow its sets table.
+  S.cap.hide = S.cap.fromScan or M.inTail()
   -- Talisman tables count as done only if a sets table follows them with
   -- nothing but blank lines between (M.feed lets them go otherwise).
   if kind == "sets" then
@@ -581,12 +606,45 @@ local function open(l)
   end
 end
 
+--- Whether the line now in the trigger is a prompt. Mudlet knows from the
+--- game's GA; without it, nothing is taken for one.
+local function atPrompt()
+  if type(isPrompt) ~= "function" then return false end
+  local ok, yes = pcall(isPrompt)
+  return ok and yes == true
+end
+
+--- Whether lines are still arriving after a scan's listing, before its prompt.
+function M.inTail()
+  return (S.tailUntil or 0) > 0 and M.now() <= S.tailUntil
+end
+
+local function startTail() S.tailUntil = M.now() + M.TAIL_WAIT end
+local function endTail() S.tailUntil = 0 end
+
+--- What follows a scan's listing up to its prompt: blank lines, the lines in
+--- M.TAIL_LINES, and the prompt, which ends it. Anything else ends it too,
+--- and is shown.
+local function tail(l)
+  if not M.inTail() then return false end
+  if atPrompt() then endTail(); return true end
+  if l == "" then return true end
+  for _, pattern in ipairs(M.TAIL_LINES) do
+    if l:find(pattern) then return true end
+  end
+  endTail()
+  return false
+end
+
 --- One line of game output. Everything the package knows comes through here.
+--- True when the line is part of what a scan was answered with, which the
+--- trigger then deletes: a scan is read, not watched. A line the package
+--- cannot place in a scan's listing, a tell above all, is always left.
 function M.feed(text)
   local l = rtrim(text or "")
   local cap = S.cap
   if l:find(M.MORE_OPEN) then
-    S.paging = true
+    S.paging, S.answered = true, false
     if cap and cap.paused then
       -- A second page break before the first was read on: the pager is
       -- showing something else now, and this listing was left unfinished.
@@ -594,17 +652,19 @@ function M.feed(text)
     elseif cap then
       cap.paused, cap.pausedAt = true, M.now()
       -- Answered only for a listing the scan asked for and is waiting on.
-      if cap.fromScan and S.scan then send("more", false) end
+      if cap.fromScan and S.scan then send("more", false); S.answered = true end
     elseif S.between and S.scan and S.scan.step then
       -- Straight after one of the scan's tables closed, with nothing but
       -- blank lines since, and the scan still waiting on the same step: the
       -- break falls between two tables of its listing, as LIST's are.
       send("more", false)
+      S.answered = true
     end
-    return
+    return S.answered
   end
   if l:find(M.MORE_CLOSE) then
-    S.paging = false
+    local ours = S.answered
+    S.paging, S.answered = false, false
     if cap and cap.paused then
       if M.now() - (cap.pausedAt or 0) > M.PAUSE_MAX then
         S.cap = nil
@@ -612,14 +672,15 @@ function M.feed(text)
         cap.paused = false
       end
     end
-    return
+    return ours
   end
   -- What the pager let in between pages is not part of any output. A new
   -- listing's header means the pager was left, so it ends that, and drops a
   -- listing that was waiting on a page.
   if S.paging then
-    if not headerKind(l) then return end
-    S.paging = false
+    -- The page's own prompt, when the scan answered it, is the scan's.
+    if not headerKind(l) then return S.answered and atPrompt() end
+    S.paging, S.answered = false, false
     if cap and cap.paused then S.cap, cap = nil, nil end
   end
   -- Between two of the scan's tables only until something else is printed.
@@ -634,25 +695,39 @@ function M.feed(text)
   if cap and (cap.rules or cap.paused) and headerKind(l) then
     S.cap, cap = nil, nil
   end
-  if cap and cap.paused then return end
+  if cap and cap.paused then return false end
   if cap then
     local verdict = READ[cap.kind](cap, l)
-    if verdict == nil then return end
+    if verdict == nil then
+      local foreign = cap.foreign
+      cap.foreign = nil
+      return cap.hide and not foreign or false
+    end
     S.cap = nil
     if verdict == "done" then
       local step = S.scan and S.scan.step
+      -- Before the commit, which may end the scan: what follows this listing
+      -- in its output is still the scan's.
+      if cap.hide then startTail() end
       M.commit(cap)
       -- A scan table closed, and the scan has not moved on: more of its
       -- listing may follow, after a page break.
       if cap.fromScan and cap.rules and step and S.scan and S.scan.step == step then
         S.between = true
       end
-      return
+      return cap.hide or false
     end
-    if verdict == "pass" then M.commit(cap) end
-    -- "pass" and "drop" both leave this line to be looked at afresh.
+    if verdict == "pass" then
+      if cap.hide then startTail() end
+      M.commit(cap)
+    end
+    -- "pass" and "drop" both leave this line to be looked at afresh. A
+    -- dropped listing's first line is gone if it was hidden: it looked like
+    -- the scan's answer, and was not. It cannot be put back.
   end
   open(l)
+  if S.cap then return S.cap.hide or false end
+  return tail(l)
 end
 
 -- ------------------------------------------------------------- the arithmetic
@@ -1139,7 +1214,8 @@ end
 function M.scan(setKw)
   M.stopScan(true)
   -- Whatever was half read before is not what the scan will be waiting for.
-  S.cap, S.paging = nil, false
+  S.cap, S.paging, S.answered = nil, false, false
+  endTail()
   local queue
   if setKw and setKw ~= "" then
     setKw = setKw:lower()
@@ -1382,7 +1458,10 @@ function M.start()
   -- its end, and the lines in between have nothing in common to match on.
   -- Outside a listing a line costs a handful of string.find calls.
   S.triggers = {
-    tempRegexTrigger("^", function() M.feed(line) end),
+    -- deleteLine after the feed, never before: the feed may echo (a scan's
+    -- last answer prints "scan done"), and the echo goes on the lines after
+    -- this one, which deleting this one leaves.
+    tempRegexTrigger("^", function() if M.feed(line) then deleteLine() end end),
   }
   S.handlers = {
     registerAnonymousEventHandler("sysUninstall", M.onUninstall),

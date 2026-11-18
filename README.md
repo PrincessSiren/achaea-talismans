@@ -89,6 +89,16 @@ yourself mid-scan cannot be told apart from the scan's own, so it may be
 paged on too. A step with no answer in 8 seconds is skipped. `tals stop`
 ends a scan, and nothing more is sent after that.
 
+**A scan is silent.** What the game answers it with is read and taken off
+the screen: the listings, the page breaks it answers, and the prompt after
+each. The window is where they show, and a scan prints one line of its own
+when it ends. What it cannot place in one of its listings is left alone, so a
+tell or an attack that arrives mid-scan is shown, and so is an answer it does
+not read, such as an error for a keyword the game does not know. A listing
+you type yourself is always shown, with the same exception as above: the
+same listing typed while the scan is waiting for it is taken for the
+scan's.
+
 ## What it keeps
 
 What it has read is saved to `achaea-talismans.lua` in your Mudlet profile's
