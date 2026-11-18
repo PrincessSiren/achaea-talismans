@@ -920,13 +920,35 @@ check(not table.concat(ECHOED, "\n"):find("Scan stopped", 1, true), "without say
 afterStop = game(setReply("dragon"))
 check(#afterStop == select(2, setReply("dragon"):gsub("\n", "")) + 1, "and the answer it waited for is then shown")
 
--- A new scan does not wait for a stopped one's last answer.
+-- A new scan waits for a stopped one's last answer: that answer, LIST
+-- here, is the kind the new scan's first step asks for, and would be taken
+-- for the new scan's own, leaving the real one on the screen.
 M.scan()
 M.stopScan()
+SENT, ECHOED = {}, {}
+check(M.scan() == false and #SENT == 0, "no scan starts while a stopped one waits")
+check(table.concat(ECHOED, "\n"):find("still waiting", 1, true), "and it says why")
+local oldList = game((LIST:gsub("^[^\n]*\n", "")))
+check(#oldList == 0, "the stopped scan's LIST, arriving then, is still hidden, got " .. table.concat(oldList, " / "))
+check(M.state.scan == nil, "and that ends the wait")
+for _, cmd in ipairs(SENT) do check(cmd == "more", "the wait sends nothing but MORE for its own LIST, got " .. cmd) end
 SENT = {}
-check(M.scan() == true and SENT[1] == "talisman list", "a scan starts while a stopped one waits")
+check(M.scan() == true and SENT[1] == "talisman list", "after which a scan starts")
 check(not M.state.scan.stopped, "and is a scan of its own")
 M.stopScan(true, true)
+
+-- A second stop with the answer half read lets the rest of it show.
+M.scan()
+game(LIST)
+game(PIECES)
+check(SENT[#SENT] == "talisman set dragon", "a scan waits on its first SET")
+M.stopScan()
+local setLines = lines(setReply("dragon"))
+local first = game(setLines[1] .. "\n" .. setLines[2])
+check(#first == 0, "its Name: and Partial name: lines, after a stop, are hidden")
+M.stopScan()
+local rest = game(table.concat(setLines, "\n", 3))
+check(#rest == #setLines - 2, "a second stop shows the rest, prompt and all, got " .. table.concat(rest, " / "))
 
 SENT = {}
 M.scan("dragon")
