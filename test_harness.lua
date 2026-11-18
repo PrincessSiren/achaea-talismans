@@ -106,17 +106,23 @@ function deleteLine() DELETED = true end
 function isPrompt() return line ~= nil and line:find("^H:%d+|") ~= nil end
 
 -- What the live trigger does with a line: its pattern is "^", so every line.
--- Returns the lines left on the screen.
+-- Returns the lines left on the screen. As in Mudlet 5.1, what a trigger
+-- echoes goes into its line, so a line deleted takes its echoes with it.
 local function game(text)
   local shown = {}
   for l in (text .. "\n"):gmatch("(.-)\n") do
     DELETED = false
+    local echoedBefore = #ECHOED
     for _, t in pairs(TRIGGERS) do
       assert(t.re == "^", "the one trigger matches every line")
       line = l
       t.fn()
     end
-    if not DELETED then shown[#shown + 1] = l end
+    if DELETED then
+      for i = #ECHOED, echoedBefore + 1, -1 do ECHOED[i] = nil end
+    else
+      shown[#shown + 1] = l
+    end
   end
   return shown
 end
@@ -1036,6 +1042,9 @@ for i, kw in ipairs(dragons) do
   check(#shown == 0, "INFO " .. kw .. " leaves nothing, got " .. any(shown))
 end
 check(M.state.scan == nil, "the set scan finished")
+check(not table.concat(ECHOED, "\n"):find("Scan completed", 1, true),
+      "the closing line waits for the trigger to finish, not to go out with its line")
+fireTimers()
 local said = table.concat(ECHOED, "\n")
 check(said:find("[tals]<reset> Scan started (set dragon)", 1, true), "a scan says it started")
 check(said:find("[tals]<reset> Scan completed (", 1, true) and said:find(" found for Dragon)", 1, true),
@@ -1061,6 +1070,7 @@ game(reply(SET_DRAGON))
 fireTimers()   -- blackdragon: no answer
 for i = 2, #dragons do game(infoFor(dragons[i])) end
 check(M.state.scan == nil, "the scan finished past the missed step")
+fireTimers()
 said = table.concat(ECHOED, "\n")
 check(said:find("Scan completed (1 piece found for Dragon). <red>Not answered: talisman info blackdragon<reset>", 1, true),
       "the closing line names what went unanswered, got " .. said)
