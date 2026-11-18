@@ -78,8 +78,9 @@ on 5.0.
 
 - **`calcFontSize(window, true)` is why it is written for 5.1.** It is new in
   5.1, and is the only way to ask the width of the cell Mudlet draws a
-  character in. On 5.0, `calcFontSize(window)` is the width of a "W", so one
-  column comes off the layout and the README says the columns may run over.
+  character in. On 5.0, `calcFontSize(window)` is the width of a "W", so the
+  layout takes one column off to be safe, and the columns may still run a
+  column or two over, as the README says.
 - **Mudlet's column and row counts run high, so the layout does not use
   them.** `getColumnCount` rounds the window's width over the font's average
   character width, while every cell is drawn at that width rounded to an
@@ -121,9 +122,11 @@ repository listed in that repository's `trusted-publishers.json` first, which
 pins the owner, the repo and the workflow file by path. So **renaming
 `release.yml` revokes publishing** until that entry is amended.
 
-Each publish opens a pull request there, and it merges itself only if the
-automated review leaves **no feedback on its head commit**. Replying to the
-feedback does not clear it; only a new release does. So:
+Each publish opens a pull request there. What follows is that repository's
+behaviour as AchaeaHidden's releases met it, not something this one controls:
+the pull request merged itself only when the automated review left **no
+feedback on its head commit**, and replying to the feedback did not clear it;
+only a new release did. So:
 
 - **When a release changes behaviour, change `DESCRIPTION` in `build.py` with
   it.** That text becomes the package's description in the registry, and the
@@ -131,12 +134,14 @@ feedback does not clear it; only a new release does. So:
   the `.mpackage`'s `config.lua` only, so changing it moves neither the `.xml`
   nor the build stamp.
 - **A stuck pull request stays open after the fix ships.** Each publish opens a
-  new one, so the old one has to be closed by a maintainer there. Merging it
+  new one, so the old one has to be closed by a maintainer there; ask in that
+  repository. Merging it
   would roll the package back to its version.
 
 Then it announces the release in Discord, if, and only if, a `DISCORD_WEBHOOK`
 secret is set on the repository. The message carries the two things a player
-can act on: the `.mpackage` and the build stamp `tals diag` prints back. That
+can act on: the `.mpackage` and the build stamp `tals diag` prints back, with
+the `mpkg install` line only once `PUBLISH_TO_MUDLET` is `true`. That
 is a channel webhook URL from Discord's *Server Settings → Integrations →
 Webhooks*, and it is a secret because it is a bearer credential: anyone holding
 it can post to that channel as this package.

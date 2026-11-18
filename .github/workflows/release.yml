@@ -147,12 +147,17 @@ jobs:
       # read in an `if:`, which is why it is lifted into `env` first -- that is
       # also what makes the step skip cleanly in a fork, where no secret exists
       # and nobody wants this repository's channel notified about their tag.
+      #
+      # The `mpkg install` line goes in only when PUBLISH_TO_MUDLET is true.
+      # Before that the package is not in the registry, so the command would
+      # fail for everyone who tried it, and the .mpackage link is the way in.
       - name: Announce in Discord
         if: env.DISCORD_WEBHOOK != ''
         continue-on-error: true
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           BUILD: ${{ steps.build.outputs.stamp }}
+          PUBLISHED: ${{ vars.PUBLISH_TO_MUDLET }}
         run: |
           version="${GITHUB_REF_NAME#v}"
           release="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME"
@@ -168,13 +173,15 @@ jobs:
             --arg release "$release" \
             --arg download "$download" \
             --arg build "$BUILD" \
+            --arg published "$PUBLISHED" \
             '{
               username: "AchaeaTalismans",
               embeds: [{
                 title: $title,
                 url: $release,
                 color: 16766720,   # 0xFFD700, the gold of the [tals] lines
-                description: "See how far your talisman pieces get you, in a window beside the game: the pieces of each talisman as bars, and every set with a mark per talisman.\n\n`mpkg install AchaeaTalismans`",
+                description: ("See how far your talisman pieces get you, in a window beside the game: the pieces of each talisman as bars, and every set with a mark per talisman."
+                  + (if $published == "true" then "\n\n`mpkg install AchaeaTalismans`" else "" end)),
                 fields: [
                   { name: "Package", value: ("[AchaeaTalismans.mpackage](" + $download + ")") },
                   { name: "Build", value: ("`" + $build + "` -- `tals diag` should say this; anything else is a stale install") }
