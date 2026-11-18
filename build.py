@@ -230,8 +230,9 @@ tals scan
 tals set dragon
 ```
 
-`tals scan` sends `TALISMAN LIST` and `TALISMAN PIECES`, then `TALISMAN INFO`
-for each talisman you hold pieces of, one at a time. Below the talismans the
+`tals scan` sends `TALISMAN LIST`, `TALISMAN PIECES` and `TALISMAN SET` for
+every set, then `TALISMAN INFO` for each talisman you hold pieces of, one at a
+time, and keeps their answers off the screen. Below the talismans the
 window lists every set, with a mark per talisman: done, started or not.
 `tals` is the full command list.
 
