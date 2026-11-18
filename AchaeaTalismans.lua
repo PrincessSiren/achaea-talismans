@@ -55,7 +55,7 @@ COMBINE and SPLIT commands that get it there are still yours to type.
 AchaeaTalismans = AchaeaTalismans or {}
 local M = AchaeaTalismans
 
-M.VERSION = "0.4.0"
+M.VERSION = "0.4.1"
 M.BUILD = M.BUILD or "source"   -- build.py replaces this
 
 -- The name Mudlet knows the package by, which is what its uninstall event
@@ -237,6 +237,12 @@ M.PAUSE_MAX = 300
 M.TAIL_LINES = {
   "^You have no incomplete talismans to show%.$",   -- TALISMAN LIST
 }
+-- What TALISMAN LIST opens with, in place of its first talisman table, when
+-- no completed talisman is carried (captured 2026-11-17). A blank line
+-- follows it, then the table of done talismans. It opens a scan's listing
+-- rather than following one, so it is not a tail line: the scan hides it
+-- only while it waits on LIST, and the blank line after it as a tail.
+M.LIST_NONE_CARRIED = "^There were no talismans found in your inventory%.$"
 -- The rest of a listing comes with it, in the same packet or the next. A
 -- tail never closed by a prompt (a client that does not mark prompts) is let
 -- go after this long, so it cannot hide a listing typed later.
@@ -759,6 +765,12 @@ function M.feed(text)
   end
   open(l)
   if S.cap then return S.cap.hide or false end
+  -- LIST's first line when nothing done is carried, before any table: the
+  -- scan's, if the scan sent the LIST, and what follows it is LIST's too.
+  if l:find(M.LIST_NONE_CARRIED) and scanWants("tlist") then
+    startTail()
+    return true
+  end
   return tail(l)
 end
 
