@@ -881,9 +881,80 @@ check(#SENT == sentNow, "an answer to something else does not move the scan on")
 fireTimers()
 check(SENT[#SENT] == "talisman info golddragon", "a step not answered in time is skipped")
 sentNow = #SENT
-check(M.stopScan(true) and M.state.scan == nil, "stop")
-fireTimers()
-check(#SENT == sentNow, "a stopped scan sends nothing more")
+ECHOED = {}
+check(M.stopScan() and M.state.scan.stopped, "stop: the step already sent is still waited on")
+check(table.concat(ECHOED, "\n"):find("Scan stopped", 1, true), "and the stop is said")
+fireTimers()   -- INFO golddragon is never answered
+check(#SENT == sentNow and M.state.scan == nil, "a stopped scan sends nothing more, and lets go when that answer never comes")
+check(not table.concat(ECHOED, "\n"):find("Scan completed", 1, true), "with no summary")
+
+-- Stopped while a full scan waits on a SET, as in game on 2026-11-18: that
+-- SET was already sent, so it is answered after the stop. It is the scan's
+-- answer, and is taken off the screen like the others, prompt and all.
+M.scan()
+game(LIST)
+game(PIECES)
+check(SENT[#SENT] == "talisman set dragon", "a second scan reaches its first SET")
+sentNow = #SENT
+ECHOED = {}
+M.stopScan()
+local afterStop = game(setReply("dragon"))
+check(#afterStop == 0, "the SET in flight at a stop is still hidden, got " .. table.concat(afterStop, " / "))
+check(#SENT == sentNow and M.state.scan == nil, "and the scan ends there, sending nothing")
+check(not table.concat(ECHOED, "\n"):find("Scan completed", 1, true), "with no summary")
+afterStop = game(setReply("dragon"))
+check(#afterStop == select(2, setReply("dragon"):gsub("\n", "")) + 1, "the same SET typed after that is shown in full")
+
+-- While a stopped scan waits, a SET for another set is not its answer.
+M.scan()
+game(LIST)
+game(PIECES)
+M.stopScan()
+afterStop = game(setReply("war"))
+check(#afterStop == select(2, setReply("war"):gsub("\n", "")) and afterStop[1] == "Partial name: war",
+      "a SET for another set after a stop is shown, but for its Name: line")
+check(M.state.scan and M.state.scan.stopped, "and the stopped scan still waits for its own")
+ECHOED = {}
+check(M.stopScan() and M.state.scan == nil, "a second stop ends the wait")
+check(not table.concat(ECHOED, "\n"):find("Scan stopped", 1, true), "without saying so twice")
+check(table.concat(ECHOED, "\n"):find("Stopped waiting", 1, true), "but saying it stopped waiting")
+afterStop = game(setReply("dragon"))
+check(#afterStop == select(2, setReply("dragon"):gsub("\n", "")) + 1, "and the answer it waited for is then shown")
+
+-- `tals stop` with nothing to stop says so, and stops nothing.
+ECHOED = {}
+check(M.stopScan() == false and M.state.scan == nil, "a stop with no scan stops nothing")
+check(table.concat(ECHOED, "\n"):find("No scan running", 1, true), "and says there is none")
+
+-- A new scan waits for a stopped one's last answer: that answer, LIST
+-- here, is the kind the new scan's first step asks for, and would be taken
+-- for the new scan's own, leaving the real one on the screen.
+M.scan()
+M.stopScan()
+SENT, ECHOED = {}, {}
+check(M.scan() == false and #SENT == 0, "no scan starts while a stopped one waits")
+check(table.concat(ECHOED, "\n"):find("still waiting", 1, true), "and it says why")
+local oldList = game((LIST:gsub("^[^\n]*\n", "")))
+check(#oldList == 0, "the stopped scan's LIST, arriving then, is still hidden, got " .. table.concat(oldList, " / "))
+check(M.state.scan == nil, "and that ends the wait")
+for _, cmd in ipairs(SENT) do check(cmd == "more", "the wait sends nothing but MORE for its own LIST, got " .. cmd) end
+SENT = {}
+check(M.scan() == true and SENT[1] == "talisman list", "after which a scan starts")
+check(not M.state.scan.stopped, "and is a scan of its own")
+M.stopScan(true, true)
+
+-- A second stop with the answer half read lets the rest of it show.
+M.scan()
+game(LIST)
+game(PIECES)
+check(SENT[#SENT] == "talisman set dragon", "a scan waits on its first SET")
+M.stopScan()
+local setLines = lines(setReply("dragon"))
+local first = game(setLines[1] .. "\n" .. setLines[2])
+check(#first == 0, "its Name: and Partial name: lines, after a stop, are hidden")
+M.stopScan()
+local rest = game(table.concat(setLines, "\n", 3))
+check(#rest == #setLines - 2, "a second stop shows the rest, prompt and all, got " .. table.concat(rest, " / "))
 
 SENT = {}
 M.scan("dragon")
@@ -892,7 +963,7 @@ game(SET_DRAGON)
 check(SENT[2] == "talisman pieces", "then PIECES, so what it counts is what it read")
 check(M.state.scan.queue[1].cmd == "talisman info blackdragon", "then INFO for each of its talismans")
 check(M.data.focus == "dragon", "and the window turns to it")
-M.stopScan(true)
+M.stopScan(true, true)
 
 -- ------------------------------------------- what review found, held down
 
@@ -937,7 +1008,7 @@ SENT = {}
 game(PROMPT .. "help talismans\n19.24 Talismans\n[Type MORE if you wish to continue reading. (19% shown)]")
 check(#SENT == 0, "a help scroll paged mid-scan is not answered")
 game(PROMPT .. "more\n[File continued via MORE]\n" .. PROMPT)
-M.stopScan(true)
+M.stopScan(true, true)
 
 -- One talisman's pieces read before anything else: the command says whose.
 AchaeaTalismans, TRIGGERS, HANDLERS = nil, {}, {}
@@ -1008,7 +1079,7 @@ check(broken:find("(12% shown)", 1, true), "the break is in")
 game(broken)
 check(table.concat(SENT, ",") == "talisman list,more,more,talisman pieces",
       "both breaks answered, the one between LIST's tables and the one in its sets table, then the scan goes on")
-M.stopScan(true)
+M.stopScan(true, true)
 
 -- A set name wider than its column pushes the keyword right; the row is kept.
 game(table.concat({
@@ -1113,12 +1184,12 @@ M.scan()
 local firstTable = LIST:sub(1, select(2, LIST:find("elemental airelemental\n" .. RULE79 .. "\n", 1, true)))
 game(firstTable .. PROMPT .. "help talismans\n19.24 Talismans\n[Type MORE if you wish to continue reading. (19% shown)]")
 check(table.concat(SENT, ",") == "talisman list", "a help scroll paged after the scan's table is not answered")
-M.stopScan(true)
+M.stopScan(true, true)
 SENT = {}
 M.scan()
 game((LIST:gsub("\nYou have no incomplete talismans to show%.", "")) .. "\n[Type MORE if you wish to continue reading. (95% shown)]")
 check(SENT[#SENT] == "talisman pieces", "a break after the scan moved on is not answered")
-M.stopScan(true)
+M.stopScan(true, true)
 game(PROMPT .. "more\n[File continued via MORE]\n" .. PROMPT)
 
 -- Only real beginnings of TALISMAN and PIECES name a talisman.
@@ -1266,7 +1337,7 @@ local function reply(text) return (text:gsub("^[^\n]*\n", "")) end
 local function infoFor(kw) return reply(INFO_RED):gsub("reddragon", kw) end
 local function any(shown) return #shown == 0 and "nothing" or table.concat(shown, " / ") end
 
-M.stopScan(true)
+M.stopScan(true, true)
 M.data.talismans = {}
 SENT, ECHOED = {}, {}
 M.scan()
@@ -1279,7 +1350,7 @@ local scanPieces = reply(PIECES):gsub("\nmore\n", "\n")
 shown = game(scanPieces)
 check(#shown == 0, "nor does PIECES, with its three pages, got " .. any(shown))
 check(#M.data.held > 0 and SENT[#SENT] == "talisman set dragon", "PIECES was read, and the sets are next")
-M.stopScan(true)
+M.stopScan(true, true)
 
 -- A set scan, to its end: SET, PIECES, then INFO for each of its six
 -- talismans. Nothing held beforehand: the count is what PIECES says.
@@ -1352,7 +1423,7 @@ check(withIncomplete:find("Water Elemental", 1, true), "the incomplete table is 
 shown = game(withIncomplete)
 check(#shown == 0, "a table after LIST's sets table is hidden with it, got " .. any(shown))
 check(M.state.scan.step.kind == "pieces", "the scan had moved on before it")
-M.stopScan(true)
+M.stopScan(true, true)
 
 -- With no completed talisman carried, LIST opens with a line, and a blank
 -- line, before its first table. In a scan they are LIST's, and hidden.
@@ -1365,7 +1436,7 @@ check(#shown == 0, "LIST's empty-inventory line in a scan leaves nothing on the 
 check(M.status("airelemental") == "done", "the done talisman after it is still counted")
 check(table.concat(SENT, ",") == "talisman list,more,talisman pieces",
       "its MORE answered, and the scan goes on, got " .. table.concat(SENT, ","))
-M.stopScan(true)
+M.stopScan(true, true)
 
 -- What the package cannot place in a scan's listing stays on the screen.
 local TELL = "Somebody tells you, \"hello there friend.\""
@@ -1375,19 +1446,19 @@ local withTell = reply(LIST):gsub("(Wonders%s+0/6%s+wonders\n)", "%1" .. TELL ..
 check(withTell:find(TELL, 1, true), "the tell is in")
 shown = game(withTell)
 check(#shown == 1 and shown[1] == TELL, "a tell in the middle of a scan's table is shown, and only it, got " .. any(shown))
-M.stopScan(true)
+M.stopScan(true, true)
 
 -- An answer the package does not read is shown, so a skipped step says why.
 M.scan("dragon")
 shown = game("There is no such talisman set.\n" .. PROMPT)
 check(#shown == 2, "an answer it cannot read is left, with its prompt")
-M.stopScan(true)
+M.stopScan(true, true)
 
 -- A help scroll paged mid-scan is not the scan's, and is left to the player.
 M.scan()
 shown = game("HELP TALISMANS\n[Type MORE if you wish to continue reading. (10% shown)]\n" .. PROMPT)
 check(#shown == 3, "a page break the scan does not answer is shown")
-M.stopScan(true)
+M.stopScan(true, true)
 
 -- What you type yourself is shown in full, scan or none.
 shown = game(SETS)
@@ -1396,14 +1467,14 @@ check(#shown == lineCount, "a typed SETS is shown, every line")
 M.scan("dragon")
 shown = game(SETS)
 check(#shown == lineCount, "and still while a scan waits on something else")
-M.stopScan(true)
+M.stopScan(true, true)
 
 -- A scan's tail ends at its prompt, or, with no prompt marked, soon after:
 -- a listing typed then is not taken for the scan's.
 M.scan("dragon")
 local noPrompt = reply(SET_DRAGON):gsub("\n" .. PROMPT:gsub("%p", "%%%0") .. "$", "\n")
 game(noPrompt)
-M.stopScan(true)
+M.stopScan(true, true)
 CLOCK = CLOCK + M.TAIL_WAIT + 1
 shown = game(SETS)
 check(#shown == lineCount, "a tail no prompt closed is let go")
@@ -1413,7 +1484,7 @@ SENT, ECHOED = {}, {}
 check(M.scan() == true and #SENT == 1, "a scan starts")
 check(M.scan("dragon") == false and #SENT == 1, "a second, while it runs, does not")
 check(table.concat(ECHOED, "\n"):find("already running", 1, true), "and says why")
-M.stopScan(true)
+M.stopScan(true, true)
 
 -- A page break the scan answered, and never saw continued: once the scan
 -- gives up on the step, or is stopped, the prompts after are shown again.
@@ -1425,12 +1496,21 @@ check(M.state.answered, "the scan answered the break")
 fireTimers()   -- no [File continued via MORE]: the step times out
 shown = game(PROMPT)
 check(#shown == 1, "a prompt after a step given up on is shown")
-M.stopScan(true)
+M.stopScan(true, true)
 M.scan()
 game(listUpToBreak)
 M.stopScan(true)
 shown = game(PROMPT)
-check(#shown == 1, "and after a stop")
+check(#shown == 0, "a stop mid-page waits for the rest of the page it answered")
+fireTimers()   -- and the rest never comes
+shown = game(PROMPT)
+check(#shown == 1, "and after the stop has given up on it")
+M.scan()
+game(listUpToBreak)
+M.stopScan(true)
+M.stopScan(true)
+shown = game(PROMPT)
+check(#shown == 1, "or straight away after a second stop")
 game("[File continued via MORE]")
 
 -- INFO or SET the scan did not ask for, typed while it waits on another, is
@@ -1452,7 +1532,7 @@ shown = game(reply(SET_DRAGON))
 check(#shown == select(2, reply(SET_DRAGON):gsub("\n", "")), "a SET typed meanwhile is shown, but for its Name: line")
 shown = game(infoFor("blackdragon"))
 check(#shown == 0, "the one it waits for is still hidden")
-M.stopScan(true)
+M.stopScan(true, true)
 
 -- -------------------------------------------------------------- uninstall
 

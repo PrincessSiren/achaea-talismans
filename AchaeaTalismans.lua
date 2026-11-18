@@ -55,7 +55,7 @@ COMBINE and SPLIT commands that get it there are still yours to type.
 AchaeaTalismans = AchaeaTalismans or {}
 local M = AchaeaTalismans
 
-M.VERSION = "0.4.1"
+M.VERSION = "0.4.2"
 M.BUILD = M.BUILD or "source"   -- build.py replaces this
 
 -- The name Mudlet knows the package by, which is what its uninstall event
@@ -1399,7 +1399,8 @@ local function scanSend()
   local step = table.remove(scan.queue, 1)
   if not step then
     S.scan = nil
-    log(M.scanSummary(scan))
+    -- A stopped scan said so when it was stopped, and has nothing to add.
+    if not scan.stopped then log(M.scanSummary(scan)) end
     return
   end
   scan.step = step
@@ -1452,8 +1453,16 @@ end
 function M.scan(setKw)
   -- One at a time. A second would leave the first's listing half read and
   -- on the screen, and a double click on [scan] would send everything twice.
-  if S.scan then
+  if S.scan and not S.scan.stopped then
     log("A scan is already running; `tals stop` ends it")
+    return false
+  end
+  -- Nor while a stopped one waits on its last answer: that answer may be
+  -- of the kind the new scan's first step asks for (LIST after LIST, SET
+  -- after SET), and taken for it, which would put the new scan one answer
+  -- ahead of the game and leave its own real answer on the screen.
+  if S.scan then
+    log("The stopped scan is still waiting on its last answer; scan again in a moment, or `tals stop` to stop waiting")
     return false
   end
   -- Whatever was half read before is not what the scan will be waiting for.
@@ -1503,7 +1512,8 @@ function M.scanHeard(cap)
   if not M.scanWaitsFor(cap) then return false end
   if scan.timer then pcall(killTimer, scan.timer); scan.timer = nil end
   scan.heard = scan.heard + 1
-  local after = scan.step.then_
+  -- A stopped scan only took its last answer off the screen, and is done.
+  local after = not scan.stopped and scan.step.then_
   if after == "allSets" then
     -- Before the INFO steps, which PIECES adds after this. Each SET records
     -- its talismans and nothing more: INFO for every talisman of every set
@@ -1550,13 +1560,37 @@ function M.scanTimeout()
   scanSend()
 end
 
-function M.stopScan(quiet)
+--- Stop a scan: nothing more is sent. The command already sent is still
+--- answered, and that answer is the scan's, so the scan waits for it alone,
+--- as long as it would have, and takes it off the screen, then ends without
+--- a summary. `now` ends the scan there and then, waiting or not, and lets
+--- whatever is left of its answer show: a second `tals stop` does that, and
+--- so does the package stopping. A new scan waits until this one is done.
+function M.stopScan(quiet, now)
   local scan = S.scan
-  if not scan then return false end
+  if not scan then
+    if not quiet then log("No scan running") end
+    return false
+  end
   if scan.timer then pcall(killTimer, scan.timer) end
+  scan.timer = nil
+  local waiting = scan.step and not scan.stopped and not now
+  if not quiet then
+    log(scan.stopped and "Stopped waiting on the scan's last answer" or "Scan stopped")
+  end
+  if waiting then
+    scan.stopped = true
+    scan.queue = {}
+    scan.timer = tempTimer(M.SCAN_WAIT, function() M.scanTimeout() end)
+    return true
+  end
   S.scan = nil
   S.answered = false
-  if not quiet then log("Scan stopped") end
+  -- Nothing is the scan's any more: the rest of an answer half read, and
+  -- the lines after it, are shown from here on.
+  if S.cap then S.cap.hide, S.cap.fromScan = false, false end
+  S.between = false
+  endTail()
   return true
 end
 
@@ -1700,7 +1734,8 @@ function M.diag()
        tostring(M.cellWidth(M.WINDOW) or "unknown") .. " px\n")
   echo("  reading:   " .. (S.cap and (S.cap.kind .. (S.cap.paused and ", paged" or "")) or "nothing") ..
        "; " .. S.read .. " outputs read since start\n")
-  echo("  scan:      " .. (S.scan and ((S.scan.step and S.scan.step.cmd or "between steps") ..
+  echo("  scan:      " .. (S.scan and ((S.scan.stopped and "stopped, waiting on " or "") ..
+       (S.scan.step and S.scan.step.cmd or "between steps") ..
        ", " .. #S.scan.queue .. " to go") or "none") .. "\n")
   echo("  triggers:  " .. #S.triggers .. " (1 is right; more means a second copy)\n")
   echo("  saved in:  " .. M.path() .. " (" .. S.loaded .. ")\n")
@@ -1715,7 +1750,7 @@ function M.stop()
   S.handlers = {}
   if S.resizeTimer then pcall(killTimer, S.resizeTimer) end
   S.resizeTimer = nil
-  M.stopScan(true)
+  M.stopScan(true, true)
   -- Reading state too: M.state lives on the global, through a recompile and
   -- through an uninstall and reinstall in one session, and the new copy
   -- should not pick up a listing half read by the old.

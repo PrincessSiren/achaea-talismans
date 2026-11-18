@@ -112,8 +112,13 @@ LIST`'s tables. It answers nothing else: a help scroll or any other output
 paged meanwhile is left to you. A listing of that kind you type
 yourself mid-scan cannot be told apart from the scan's own, so it may be
 paged on too. A step with no answer in 8 seconds is skipped. `tals stop`
-ends a scan, and nothing more is sent after that. One scan runs at a time:
-`tals scan` while one is running sends nothing and says so.
+ends a scan: no further command is sent. The command it had already sent
+is still answered, and that answer is taken off the screen like the rest,
+its page breaks answered too, if it comes within 8 seconds; a second
+`tals stop` stops waiting, says so, and whatever is left of the answer
+shows. With no scan running, `tals stop` says that. One scan runs
+at a time: `tals scan` while one is running, or while a stopped one is
+still waiting on its last answer, sends nothing and says so.
 
 **A scan is silent.** What the game answers it with is read and taken off
 the screen: the listings, the page breaks it answers, and the prompt after
