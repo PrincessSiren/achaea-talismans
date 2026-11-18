@@ -91,8 +91,17 @@ ends a scan, and nothing more is sent after that.
 
 **A scan is silent.** What the game answers it with is read and taken off
 the screen: the listings, the page breaks it answers, and the prompt after
-each. The window is where they show, and a scan prints one line of its own
-when it ends. What it cannot place in one of its listings is left alone, so a
+each. The window is where they show. A scan prints two lines of its own:
+
+```
+[tals] Scan started
+[tals] Scan completed (42 pieces found)
+```
+
+The count is the pieces you hold, one per piece whatever its level; after
+`tals scan <set>`, only those toward that set. A step the game did not answer
+in time is named on the second line (`Not answered: talisman info
+golddragon`). What it cannot place in one of its listings is left alone, so a
 tell or an attack that arrives mid-scan is shown, and so is an answer it does
 not read, such as an error for a keyword the game does not know. A listing
 you type yourself is always shown, with the same exception as above: the

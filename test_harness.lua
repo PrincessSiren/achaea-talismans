@@ -1036,8 +1036,34 @@ for i, kw in ipairs(dragons) do
   check(#shown == 0, "INFO " .. kw .. " leaves nothing, got " .. any(shown))
 end
 check(M.state.scan == nil, "the set scan finished")
-local said = table.concat(ECHOED)
-check(said:find("scan done: 7 read", 1, true), "and says so, the one line a scan prints")
+local said = table.concat(ECHOED, "\n")
+check(said:find("[tals]<reset> Scan started (set dragon)", 1, true), "a scan says it started")
+check(said:find("[tals]<reset> Scan completed (", 1, true) and said:find(" found for Dragon)", 1, true),
+      "and that it finished, with what it found in the set: " .. said)
+check(not said:find("Not answered", 1, true), "every step answered, so nothing is listed as missed")
+local _, lines = said:gsub("%[tals%]", "")
+check(lines == 2, "two lines, and no more, got " .. lines)
+
+-- The pieces found are counted as the game lists them, one per piece.
+M.data.held = {
+  { kw = "reddragonclaw", count = 2, level = 3, group = "reddragon" },
+  { kw = "brothspice", count = 1, level = 1, group = "ogrebroth" },
+}
+check(M.piecesHeld() == 3, "three pieces held in all")
+check(M.piecesHeld("dragon") == 2, "two of them toward the Dragon set")
+check(M.scanSummary({ unanswered = {} }) == "Scan completed (3 pieces found)", "the summary of a full scan")
+
+-- A step the game never answered is named on the closing line.
+ECHOED = {}
+M.data.held = { { kw = "reddragonclaw", count = 1, level = 3, group = "reddragon" } }
+M.scan("dragon")
+game(reply(SET_DRAGON))
+fireTimers()   -- blackdragon: no answer
+for i = 2, #dragons do game(infoFor(dragons[i])) end
+check(M.state.scan == nil, "the scan finished past the missed step")
+said = table.concat(ECHOED, "\n")
+check(said:find("Scan completed (1 piece found for Dragon). <red>Not answered: talisman info blackdragon<reset>", 1, true),
+      "the closing line names what went unanswered, got " .. said)
 
 -- Incomplete talismans come after LIST's sets table, by when the scan has
 -- moved on to PIECES; they are still LIST's, and hidden with it.

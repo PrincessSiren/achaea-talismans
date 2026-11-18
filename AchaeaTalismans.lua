@@ -108,7 +108,7 @@ local S = M.state
 local function log(message, colour)
   -- A leading newline, because this is often called from a trigger, and
   -- echo inside a trigger is glued onto the end of the line that fired it.
-  cecho("\n<" .. (colour or "gold") .. ">[talismans]<reset> " .. message .. "\n")
+  cecho("\n<" .. (colour or "gold") .. ">[tals]<reset> " .. message .. "\n")
 end
 
 function M.now()
@@ -1194,8 +1194,7 @@ local function scanSend()
   local step = table.remove(scan.queue, 1)
   if not step then
     S.scan = nil
-    log("scan done: " .. scan.heard .. " read" ..
-        (scan.missed > 0 and (", " .. scan.missed .. " not answered") or ""))
+    log(M.scanSummary(scan))
     return
   end
   scan.step = step
@@ -1211,15 +1210,51 @@ local function infoFor(list)
   return steps
 end
 
+--- Pieces held, counted as the game lists them (a level-5 piece is one),
+--- of every talisman, or of one set's talismans only.
+function M.piecesHeld(setKw)
+  local inSet
+  if setKw then
+    inSet = {}
+    local set = M.data.sets[setKw]
+    for _, t in ipairs(set and set.talismans or {}) do inSet[t.kw] = true end
+  end
+  local n = 0
+  for _, row in ipairs(M.data.held) do
+    if not inSet or inSet[row.group or M.ownerOf(row.kw) or ""] then
+      n = n + (row.count or 1)
+    end
+  end
+  return n
+end
+
+--- The line a scan ends on: what it found, and every step the game never
+--- answered, since those lines were not hidden but are easily missed.
+function M.scanSummary(scan)
+  local n = M.piecesHeld(scan.set)
+  local found = n .. (n == 1 and " piece" or " pieces") .. " found"
+  if scan.set then
+    local set = M.data.sets[scan.set]
+    found = found .. " for " .. (set and set.name or scan.set)
+  end
+  local line = "Scan completed (" .. found .. ")"
+  if #scan.unanswered > 0 then
+    line = line .. ". <red>Not answered: " .. table.concat(scan.unanswered, ", ") .. "<reset>"
+  end
+  return line
+end
+
 function M.scan(setKw)
   M.stopScan(true)
   -- Whatever was half read before is not what the scan will be waiting for.
   S.cap, S.paging, S.answered = nil, false, false
   endTail()
-  local queue
+  local queue, set
   if setKw and setKw ~= "" then
     setKw = setKw:lower()
+    set = setKw
     queue = { { cmd = "talisman set " .. setKw, kind = "set", then_ = "setInfo" } }
+    log("Scan started (set " .. setKw .. ")")
     M.data.focus = M.data.sets[setKw] and setKw or M.data.focus
   else
     -- LIST rather than SETS: it prints the same sets table, after the
@@ -1228,8 +1263,9 @@ function M.scan(setKw)
       { cmd = "talisman list", kind = "sets", kinds = { tlist = true } },
       { cmd = "talisman pieces", kind = "pieces", then_ = "heldInfo" },
     }
+    log("Scan started")
   end
-  S.scan = { queue = queue, heard = 0, missed = 0 }
+  S.scan = { queue = queue, heard = 0, missed = 0, unanswered = {}, set = set }
   scanSend()
   return true
 end
@@ -1254,6 +1290,8 @@ function M.scanHeard(cap)
     for _, t in ipairs(cap.rows or {}) do list[#list + 1] = t.kw end
     for _, step in ipairs(infoFor(list)) do scan.queue[#scan.queue + 1] = step end
     M.data.focus = cap.key or cap.kw
+    -- SET's own keyword for the set, which the one typed may cut short.
+    scan.set = M.data.focus
     M.save()
   end
   scan.step = nil
@@ -1266,6 +1304,7 @@ function M.scanTimeout()
   if not scan then return end
   scan.timer = nil
   scan.missed = scan.missed + 1
+  if scan.step then scan.unanswered[#scan.unanswered + 1] = scan.step.cmd end
   scan.step = nil
   scanSend()
 end
@@ -1275,7 +1314,7 @@ function M.stopScan(quiet)
   if not scan then return false end
   if scan.timer then pcall(killTimer, scan.timer) end
   S.scan = nil
-  if not quiet then log("scan stopped") end
+  if not quiet then log("Scan stopped") end
   return true
 end
 
@@ -1459,7 +1498,7 @@ function M.start()
   -- Outside a listing a line costs a handful of string.find calls.
   S.triggers = {
     -- deleteLine after the feed, never before: the feed may echo (a scan's
-    -- last answer prints "scan done"), and the echo goes on the lines after
+    -- last answer prints "Scan completed"), and the echo goes on the lines after
     -- this one, which deleting this one leaves.
     tempRegexTrigger("^", function() if M.feed(line) then deleteLine() end end),
   }
