@@ -1108,7 +1108,7 @@ do
   -- Too short: the foot says there is more, with the top's two links, on
   -- the empty line the drawing ends on.
   local w = WINDOWS[M.WINDOW]
-  local foot = "\n<dim_grey>↑ more above  <cyan>[scan] <cyan>[all]"
+  local foot = "\n<gold>↑ <dim_grey>more above  <cyan>[scan] <cyan>[all]"
   check(w:sub(-#foot) == foot, "a line at the foot says there is more: " .. w:sub(-80))
   local footLinks = {}
   for i = #LINKS - 1, #LINKS do footLinks[#footLinks + 1] = LINKS[i].code end
@@ -1118,7 +1118,7 @@ do
   M.data.focus = "dragon"
   ROWS = 3
   M.redraw()
-  local setFoot = "↑ more above  <cyan>[scan set] <cyan>[back to sets]"
+  local setFoot = "↑ <dim_grey>more above  <cyan>[scan set] <cyan>[back to sets]"
   check(WINDOWS[M.WINDOW]:sub(-#setFoot) == setFoot, "a set's foot has its own links")
   M.data.focus = ""
   ROWS = fits - 1

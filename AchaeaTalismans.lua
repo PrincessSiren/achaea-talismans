@@ -1240,7 +1240,9 @@ end
 --- the top's two links.
 function M.moreAbove()
   local d = M.data
-  local out = { "<dim_grey>↑ more above  " }
+  -- The arrow in the package's own gold, the colour of its [tals] lines:
+  -- cyan is a link here, green and yellow are marks, white is a heading.
+  local out = { "<gold>↑ <dim_grey>more above  " }
   if d.focus ~= "" then
     out[#out + 1] = { "<cyan>[scan set]", "AchaeaTalismans.scan(" .. q(d.focus) .. ")",
       "send TALISMAN SET and PIECES, then INFO for each of its talismans" }
