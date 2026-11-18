@@ -917,8 +917,14 @@ check(M.state.scan and M.state.scan.stopped, "and the stopped scan still waits f
 ECHOED = {}
 check(M.stopScan() and M.state.scan == nil, "a second stop ends the wait")
 check(not table.concat(ECHOED, "\n"):find("Scan stopped", 1, true), "without saying so twice")
+check(table.concat(ECHOED, "\n"):find("Stopped waiting", 1, true), "but saying it stopped waiting")
 afterStop = game(setReply("dragon"))
 check(#afterStop == select(2, setReply("dragon"):gsub("\n", "")) + 1, "and the answer it waited for is then shown")
+
+-- `tals stop` with nothing to stop says so, and stops nothing.
+ECHOED = {}
+check(M.stopScan() == false and M.state.scan == nil, "a stop with no scan stops nothing")
+check(table.concat(ECHOED, "\n"):find("No scan running", 1, true), "and says there is none")
 
 -- A new scan waits for a stopped one's last answer: that answer, LIST
 -- here, is the kind the new scan's first step asks for, and would be taken

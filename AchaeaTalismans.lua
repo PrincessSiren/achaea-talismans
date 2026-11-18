@@ -1568,11 +1568,16 @@ end
 --- so does the package stopping. A new scan waits until this one is done.
 function M.stopScan(quiet, now)
   local scan = S.scan
-  if not scan then return false end
+  if not scan then
+    if not quiet then log("No scan running") end
+    return false
+  end
   if scan.timer then pcall(killTimer, scan.timer) end
   scan.timer = nil
   local waiting = scan.step and not scan.stopped and not now
-  if not quiet and not scan.stopped then log("Scan stopped") end
+  if not quiet then
+    log(scan.stopped and "Stopped waiting on the scan's last answer" or "Scan stopped")
+  end
   if waiting then
     scan.stopped = true
     scan.queue = {}

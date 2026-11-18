@@ -115,7 +115,8 @@ paged on too. A step with no answer in 8 seconds is skipped. `tals stop`
 ends a scan: no further command is sent. The command it had already sent
 is still answered, and that answer is taken off the screen like the rest,
 its page breaks answered too, if it comes within 8 seconds; a second
-`tals stop` stops waiting, and whatever is left of it shows. One scan runs
+`tals stop` stops waiting, says so, and whatever is left of the answer
+shows. With no scan running, `tals stop` says that. One scan runs
 at a time: `tals scan` while one is running, or while a stopped one is
 still waiting on its last answer, sends nothing and says so.
 
