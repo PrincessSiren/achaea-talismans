@@ -1248,7 +1248,14 @@ end
 function M.open()
   openUserWindow(M.WINDOW, true, true)
   pcall(setUserWindowTitle, M.WINDOW, "Talismans")
+  -- A user window's scroll bar is hidden until asked for (TConsole, in 5.0.1
+  -- and 5.1.0), and a window shorter than what is drawn in it then cuts off
+  -- the top with no sign that there is more.
+  pcall(enableScrollBar, M.WINDOW)
   S.opened = true
+  -- The bar takes its width from the text. Qt lays that out after this
+  -- returns, so the window is measured again once it has.
+  M.onResize(nil, nil, nil, M.WINDOW)
 end
 
 --- Draw what is known into the window. It is opened only the first time,

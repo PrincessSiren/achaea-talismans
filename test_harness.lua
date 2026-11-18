@@ -48,6 +48,8 @@ function openUserWindow(name, _, _, area)
   if area ~= nil then DOCKED_TO = area end
 end
 function setUserWindowTitle() end
+local SCROLLBAR = {}
+function enableScrollBar(name) SCROLLBAR[name] = true end
 function clearWindow(name) WINDOWS[name] = "" end
 function hideWindow() HIDDEN = HIDDEN + 1 end
 local COLUMNS, WRAP = nil, nil
@@ -350,6 +352,8 @@ local M = AchaeaTalismans
 check(count(TRIGGERS) == 1, "one trigger")
 check(OPENED >= 1 and WINDOWS[M.WINDOW] ~= nil, "a fresh install opens its window")
 check(WINDOWS[M.WINDOW]:find("No pieces read yet", 1, true), "an empty window says what to do")
+check(SCROLLBAR[M.WINDOW], "the window has a scroll bar, so a window too short for it shows there is more")
+check(count(TIMERS) >= 1, "and is measured again once the bar has taken its width")
 check(#SENT == 0, "installing sends nothing")
 
 -- A recompile replaces the trigger rather than adding a second.
@@ -702,6 +706,8 @@ COLUMNS = 61
 M.redraw()
 check(WRAP == 60 and across(WINDOWS[M.WINDOW]) == 1,
       "the window is drawn to its measured width, one column off")
+fireTimers()   -- the measure after the scroll bar, still pending from the open
+check(WRAP == 60, "at the same width, nothing changes")
 COLUMNS = 201
 raise("sysUserWindowResizeEvent", 1600, 400, "SomeOtherWindow")
 fireTimers()
