@@ -297,6 +297,24 @@ local LIST = table.concat({
   PROMPT,
 }, "\n")
 
+-- LIST with no completed talisman carried, captured 2026-11-17: a line in
+-- place of the first table, and a blank line, then the done talismans as
+-- before. The capture stops at its page break; the rest is LIST's own.
+local LIST_NONE_CARRIED = table.concat({
+  PROMPT .. "talisman list",
+  "There were no talismans found in your inventory.",
+  "",
+  "Name                                          Set       Keyword             ",
+  RULE79,
+  "a miniature Air Elemental                     elemental airelemental",
+  RULE79,
+  "",
+  setsTable(11, 49),
+  "",
+  "You have no incomplete talismans to show.",
+  PROMPT,
+}, "\n")
+
 local SET_DRAGON = table.concat({
   PROMPT .. "talisman set dragon",
   "Name: Dragon",
@@ -468,6 +486,16 @@ game(LIST:gsub("\nYou have no incomplete talismans to show%.",
 check(not M.data.completed.seatears, "a talisman table after the sets is not done")
 game(SETS)
 check(not M.data.completed.seatears, "nor once a later SETS arrives")
+-- With no completed talisman carried, LIST opens with a line in place of a
+-- table. Typed, it is read as before, and every line of it is shown.
+M.data.completed.airelemental = nil
+SENT = {}
+local typedNone = game(LIST_NONE_CARRIED)
+check(M.status("airelemental") == "done", "the done talisman is read after LIST's empty-inventory line")
+check(#typedNone == select(2, LIST_NONE_CARRIED:gsub("\n", "")) + 1, "a typed LIST is shown, every line")
+check(typedNone[2] == "There were no talismans found in your inventory." and typedNone[3] == "",
+      "its empty-inventory line and the blank after it included")
+check(#SENT == 0, "and its MORE is left to the player")
 
 -- -------------------------------------------------- PIECES for one talisman
 
@@ -1324,6 +1352,19 @@ check(withIncomplete:find("Water Elemental", 1, true), "the incomplete table is 
 shown = game(withIncomplete)
 check(#shown == 0, "a table after LIST's sets table is hidden with it, got " .. any(shown))
 check(M.state.scan.step.kind == "pieces", "the scan had moved on before it")
+M.stopScan(true)
+
+-- With no completed talisman carried, LIST opens with a line, and a blank
+-- line, before its first table. In a scan they are LIST's, and hidden.
+M.data.completed.airelemental = nil
+M.data.talismans = {}
+SENT = {}
+M.scan()
+shown = game(reply(LIST_NONE_CARRIED))
+check(#shown == 0, "LIST's empty-inventory line in a scan leaves nothing on the screen, got " .. any(shown))
+check(M.status("airelemental") == "done", "the done talisman after it is still counted")
+check(table.concat(SENT, ",") == "talisman list,more,talisman pieces",
+      "its MORE answered, and the scan goes on, got " .. table.concat(SENT, ","))
 M.stopScan(true)
 
 -- What the package cannot place in a scan's listing stays on the screen.
