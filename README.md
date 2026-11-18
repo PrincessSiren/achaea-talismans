@@ -35,7 +35,9 @@ first marks. Docked under Mudlet's mapper, the window is as wide as the
 mapper. A window too narrow to show four marks a line in half of it lists
 the sets in one column. When the window is too short for all of it, it shows
 a scroll bar, which Mudlet otherwise leaves off a user window, so there is a
-sign of more above; when everything fits, the bar goes. Like the columns,
+sign of more above, and a last line, `↑ more above  [scan] [all]`, repeats
+the top's two links (in a set, `[scan set] [back to sets]`); when everything
+fits, both go. Like the columns,
 Mudlet's count of a window's lines can be a little high, so the package
 works out the lines that fit for certain. Mudlet's own column count for a window can be a few too many, since
 it divides by the font's average character width as a fraction while each

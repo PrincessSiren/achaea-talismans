@@ -1101,15 +1101,45 @@ do
   repeat fits = fits + 1; ROWS = fits until M.rows(M.WINDOW) >= drawn
   M.redraw()
   check(SCROLLBAR[M.WINDOW] == false, "just enough rows: no bar")
+  check(not WINDOWS[M.WINDOW]:find("more above", 1, true), "and no line saying there is more")
   ROWS = fits - 1
   M.redraw()
   check(SCROLLBAR[M.WINDOW] == true, "more lines than fit for certain: the bar")
-  -- The window made taller, at the same width: the bar goes, with no redraw.
+  -- Too short: the foot says there is more, with the top's two links, on
+  -- the empty line the drawing ends on.
+  local w = WINDOWS[M.WINDOW]
+  local foot = "\n<dim_grey>↑ more above  <cyan>[scan] <cyan>[all]"
+  check(w:sub(-#foot) == foot, "a line at the foot says there is more: " .. w:sub(-80))
+  local footLinks = {}
+  for i = #LINKS - 1, #LINKS do footLinks[#footLinks + 1] = LINKS[i].code end
+  check(footLinks[1] == "AchaeaTalismans.scan()" and footLinks[2] == "AchaeaTalismans.setFocus('')", "and its links are the top's")
+  check(M.state.drawnLines == drawn, "it adds no line")
+  -- In a focused set, the set's own two.
+  M.data.focus = "dragon"
+  ROWS = 3
+  M.redraw()
+  local setFoot = "↑ more above  <cyan>[scan set] <cyan>[back to sets]"
+  check(WINDOWS[M.WINDOW]:sub(-#setFoot) == setFoot, "a set's foot has its own links")
+  M.data.focus = ""
+  ROWS = fits - 1
+  M.redraw()
+  -- The window made taller, at the same width: the bar and the foot go.
   ROWS = 200
-  local links = #LINKS
   raise("sysUserWindowResizeEvent", 600, 2000, M.WINDOW)
   fireTimers()
-  check(SCROLLBAR[M.WINDOW] == false and #LINKS == links, "a taller window drops the bar without drawing again")
+  check(SCROLLBAR[M.WINDOW] == false, "a taller window drops the bar")
+  check(not WINDOWS[M.WINDOW]:find("more above", 1, true), "and the foot")
+  -- Taller still, nothing to change: neither drawn again nor the bar touched.
+  local links, changes = #LINKS, BAR_CHANGES
+  ROWS = 300
+  raise("sysUserWindowResizeEvent", 600, 3000, M.WINDOW)
+  fireTimers()
+  check(#LINKS == links and BAR_CHANGES == changes, "a resize that changes nothing draws nothing")
+  -- And shorter again: both come back.
+  ROWS = fits - 1
+  raise("sysUserWindowResizeEvent", 600, 200, M.WINDOW)
+  fireTimers()
+  check(SCROLLBAR[M.WINDOW] == true and WINDOWS[M.WINDOW]:find("more above", 1, true), "a shorter window gets both back")
   -- A window that cannot say its rows keeps the bar.
   ROWS = nil
   M.redraw()

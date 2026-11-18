@@ -1232,8 +1232,34 @@ end
 --- Returns how many lines that takes, counting the empty one a closing
 --- newline leaves.
 function M.draw(win)
+  return M.drawPieces(win, M.render(M.width(win)))
+end
+
+--- The line under everything when the window is too short for it all: the
+--- top is what scrolls out of sight, so this says there is more and repeats
+--- the top's two links.
+function M.moreAbove()
+  local d = M.data
+  local out = { "<dim_grey>↑ more above  " }
+  if d.focus ~= "" then
+    out[#out + 1] = { "<cyan>[scan set]", "AchaeaTalismans.scan(" .. q(d.focus) .. ")",
+      "send TALISMAN SET and PIECES, then INFO for each of its talismans" }
+    out[#out + 1] = " "
+    out[#out + 1] = { "<cyan>[back to sets]", "AchaeaTalismans.setFocus('')",
+      "every talisman you hold pieces of, and every set" }
+  else
+    out[#out + 1] = { "<cyan>[scan]", "AchaeaTalismans.scan()",
+      "send TALISMAN LIST, PIECES and SET for every set, then INFO for what you hold" }
+    out[#out + 1] = " "
+    out[#out + 1] = { "<cyan>[all]", "AchaeaTalismans.setFocus('')", "the pieces you hold, and every set" }
+  end
+  return out
+end
+
+--- Draw pieces as M.render makes them; returns the lines drawn, as M.draw.
+function M.drawPieces(win, pieces)
   local lines = 1
-  for _, piece in ipairs(M.render(M.width(win))) do
+  for _, piece in ipairs(pieces) do
     if type(piece) == "table" then
       if win then cechoLink(win, piece[1], piece[2], piece[3], true)
       else cechoLink(piece[1], piece[2], piece[3], true) end
@@ -1309,8 +1335,19 @@ function M.redraw()
   pcall(setWindowWrap, M.WINDOW, S.drawnWidth)
   clearWindow(M.WINDOW)
   S.drawnLines = M.draw(M.WINDOW)
+  -- Too short for it all, as far as can be told: a line at the foot says
+  -- so. It goes on the empty line the drawing ends on, so it adds none.
+  S.overflow = M.overflows(S.drawnLines)
+  if S.overflow then M.drawPieces(M.WINDOW, M.moreAbove()) end
   M.fitScrollBar(S.drawnLines)
   return true
+end
+
+--- Whether this many lines are more than the window shows for certain. Not
+--- when that cannot be told: the scroll bar is up then, and says enough.
+function M.overflows(lines)
+  local rows = M.rows(M.WINDOW)
+  return rows ~= nil and lines > rows
 end
 
 -- How long a resize has to settle before the window is laid out again:
@@ -1324,7 +1361,10 @@ function M.onResize(_, _, _, name)
   if S.resizeTimer then pcall(killTimer, S.resizeTimer) end
   S.resizeTimer = tempTimer(M.RESIZE_WAIT, function()
     S.resizeTimer = nil
-    if M.width(M.WINDOW) ~= S.drawnWidth then
+    -- Drawn again for a new width, or for the line at the foot coming or
+    -- going; otherwise only the bar is looked at.
+    if M.width(M.WINDOW) ~= S.drawnWidth
+        or (S.drawnLines and M.overflows(S.drawnLines) ~= S.overflow) then
       M.redraw()
     elseif S.drawnLines then
       M.fitScrollBar(S.drawnLines)
