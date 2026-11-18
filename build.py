@@ -101,7 +101,7 @@ ALIASES: list[tuple[str, str, str, str, str]] = [
         r"^tals\s+scan$",
         "AchaeaTalismans.scan()",
         "tals scan",
-        "send TALISMAN LIST and PIECES, then INFO for what you hold",
+        "send TALISMAN LIST, PIECES and SET for every set, then INFO for what you hold",
     ),
     (
         "scanset",

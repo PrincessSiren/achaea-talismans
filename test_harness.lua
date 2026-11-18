@@ -48,12 +48,27 @@ function openUserWindow(name, _, _, area)
   if area ~= nil then DOCKED_TO = area end
 end
 function setUserWindowTitle() end
+local SCROLLBAR, BAR_CHANGES = {}, 0
+function enableScrollBar(name) SCROLLBAR[name] = true; BAR_CHANGES = BAR_CHANGES + 1 end
+function disableScrollBar(name) SCROLLBAR[name] = false; BAR_CHANGES = BAR_CHANGES + 1 end
+local ROWS = nil
+function getRowCount(name)
+  if ROWS == nil then error("getRowCount: bad argument #1 type (window name \"" .. tostring(name) .. "\" not found)") end
+  return ROWS
+end
 function clearWindow(name) WINDOWS[name] = "" end
 function hideWindow() HIDDEN = HIDDEN + 1 end
 local COLUMNS, WRAP = nil, nil
 function getColumnCount(name)
   if COLUMNS == nil then error("getColumnCount: bad argument #1 type (window name \"" .. tostring(name) .. "\" not found)") end
   return COLUMNS
+end
+-- calcFontSize(win, true) is 5.1's cell width; 5.0 raises for the flag.
+CELL, CALC_RAISES_ON_FLAG = nil, false
+function calcFontSize(win, average)
+  if CELL == nil then return nil end
+  if average and CALC_RAISES_ON_FLAG then error("calcFontSize: bad argument #1 type (font size as number expected, got string!)") end
+  return CELL, 16
 end
 function setWindowWrap(name, n) if name == AchaeaTalismans.WINDOW then WRAP = n end end
 function getMudletHomeDir() return "/profile" end
@@ -343,6 +358,8 @@ local M = AchaeaTalismans
 check(count(TRIGGERS) == 1, "one trigger")
 check(OPENED >= 1 and WINDOWS[M.WINDOW] ~= nil, "a fresh install opens its window")
 check(WINDOWS[M.WINDOW]:find("No pieces read yet", 1, true), "an empty window says what to do")
+check(SCROLLBAR[M.WINDOW] == true, "a window whose lines cannot be counted has its scroll bar")
+check(count(TIMERS) >= 1, "and is measured again once the bar has taken its width")
 check(#SENT == 0, "installing sends nothing")
 
 -- A recompile replaces the trigger rather than adding a second.
@@ -590,7 +607,69 @@ check(sideBySide(shown(60), "Dragon ", "yggdrasil"), "and two of sets")
 check(across(shown(200)) >= 3, "a wide one has several of talismans, got " .. across(shown(200)))
 check(not shown(200):find("\n\n\n", 1, true) and not shown(60):find("\n\n\n", 1, true),
       "an open talisman's blank line is never two, nor at a column's foot")
-check(#lines(shown(200)) < #lines(shown(60)) / 2, "and is less than half as tall")
+check(#lines(shown(200)) < #lines(shown(60)), "and is shorter")
+
+-- The sets: two columns, whatever the width, and a set's marks wrap within
+-- its column under the first of them. Marks, with 19 talismans, is the
+-- longest set in the game.
+do
+  local real = M.data.sets.marks.talismans
+  local nineteen = {}
+  for i = 1, 19 do nineteen[i] = { name = "mark " .. i, kw = "mark" .. i } end
+  local others = {}
+  for kw, set in pairs(M.data.sets) do others[kw] = set.talismans; set.talismans = nil end
+  M.data.sets.marks.talismans = nineteen
+  local function setLines(width)
+    local text = shown(width)
+    return lines(text:sub((text:find("Sets", 1, true))))
+  end
+  local function plain(l) return (l:gsub("<[%w_,:]+>", "")) end
+  -- Two sets on one line: two counts, as "0/19".
+  local function twoAcross(ls)
+    for _, l in ipairs(ls) do
+      if select(2, plain(l):gsub("%d+/%d+", "")) >= 2 then return true end
+    end
+    return false
+  end
+  for _, width in ipairs({ 51, 67, 80, 120, 200 }) do
+    local ls = setLines(width)
+    local widest, marksAt, wrapped = 0, nil, nil
+    for i, l in ipairs(ls) do
+      widest = math.max(widest, M.textWidth(l))
+      if plain(l):find("^Marks ") then marksAt = i end
+    end
+    check(widest <= width, "the sets fit " .. width .. " columns, got " .. widest)
+    check(marksAt, "Marks is listed at " .. width)
+    check(twoAcross(ls), "two columns of sets at " .. width)
+    -- Marks is the only set with marks here, so every circle is its own.
+    local lead = #"Miscellaneous" + 1 + 5 + 1
+    local colW = math.floor((width - M.GAP) / 2)
+    local perLine = colW - lead
+    local function circles(l) return select(2, plain(l):gsub("○", "")) end
+    check(circles(ls[marksAt]) == math.min(19, perLine),
+          ("Marks shows %d marks on its first line at %d, got %d"):format(math.min(19, perLine), width, circles(ls[marksAt])))
+    local total, i = 0, marksAt
+    while ls[i] and circles(ls[i]) > 0 do
+      total = total + circles(ls[i])
+      if i > marksAt then
+        check(plain(ls[i]):find(string.rep(" ", lead) .. "○", 1, true), "the rest wrap under the first mark at " .. width)
+      end
+      i = i + 1
+    end
+    check(total == 19, "all 19 marks shown at " .. width .. ", got " .. total)
+  end
+  -- The live window: 67 columns, two of sets, 12 marks a line.
+  local ls = setLines(67)
+  local twoLines = 0
+  for i, l in ipairs(ls) do if plain(l):find("^Marks ") then twoLines = i end end
+  check(select(2, plain(ls[twoLines]):gsub("○", "")) >= 12, "at 67 Marks' first line holds 12")
+  -- Too narrow for two columns with marks: one column, of the full width.
+  local narrow = setLines(40)
+  check(not twoAcross(narrow), "one column of sets at 40")
+  for _, l in ipairs(narrow) do check(M.textWidth(l) <= 40, "and it fits") end
+  for kw, set in pairs(M.data.sets) do set.talismans = others[kw] end
+  M.data.sets.marks.talismans = real
+end
 check(not shown(80):find(" \n"), "no line ends in padding")
 check(shown(1):find("22/64", 1, true), "a window narrower than anything is one column")
 check(#M.layout({}, 80, 1) == 0, "nothing to lay out is no columns")
@@ -633,6 +712,8 @@ COLUMNS = 61
 M.redraw()
 check(WRAP == 60 and across(WINDOWS[M.WINDOW]) == 1,
       "the window is drawn to its measured width, one column off")
+fireTimers()   -- the measure after the scroll bar, still pending from the open
+check(WRAP == 60, "at the same width, nothing changes")
 COLUMNS = 201
 raise("sysUserWindowResizeEvent", 1600, 400, "SomeOtherWindow")
 fireTimers()
@@ -646,6 +727,28 @@ local drawn = #LINKS
 raise("sysUserWindowResizeEvent", 1600, 401, M.WINDOW)
 fireTimers()
 check(#LINKS == drawn, "a resize to the same width is not redrawn")
+-- With the cell width known, the width is what fits for certain. As seen
+-- live: getColumnCount said 72 of a window that showed 68 or 69 columns of
+-- 8-pixel cells, from a fractional average near 7.6.
+CELL = 8
+COLUMNS = 72
+check(M.width(M.WINDOW) == 67, "72 counted at an 8-pixel cell is 67 for certain, got " .. M.width(M.WINDOW))
+-- Every average that rounds to 8 and every window that rounds to 72 of it:
+-- the width given always fits in the cells drawn.
+for avg = 7.5, 8.49, 0.01 do
+  for px = (72 - 0.5) * avg, (72 + 0.49) * avg, 1 do
+    if math.floor(px / avg + 0.5) == 72 then
+      check(M.width(M.WINDOW) <= math.floor(px / 8), ("fits at average %.2f, %d px"):format(avg, px))
+    end
+  end
+end
+CALC_RAISES_ON_FLAG = true   -- 5.0: calcFontSize(win, true) raises
+CELL = 9                     -- and calcFontSize(win) is a "W", not the cell
+check(M.width(M.WINDOW) == 71, "before 5.1, no cell width: one column off, not the W")
+CALC_RAISES_ON_FLAG, CELL = false, nil
+check(M.width(M.WINDOW) == 71, "with no cell width, one column off, as before")
+M.diag()
+check(table.concat(ECHOED):find("getColumnCount 72", 1, true), "diag shows what Mudlet counted")
 COLUMNS = nil
 M.redraw()
 check(WRAP == M.DEFAULT_WIDTH, "a window that cannot be measured gets the default")
@@ -701,16 +804,58 @@ check(SENT[2] == "more", "a scan answers the pager for its own listing")
 check(SENT[3] == "talisman pieces", "then PIECES, once LIST's sets table is read")
 game(PIECES)
 check(SENT[4] == "more" and SENT[5] == "more" and SENT[6] == "more", "three pages")
-check(SENT[7] == "talisman info blackdragon", "then INFO for the first talisman held and not read")
+check(SENT[7] == "talisman set dragon", "then SET for every set LIST listed, in its order")
+local queued = { set = 0, info = 0 }
+local lastSet, firstInfo = 0, nil
+for i, step in ipairs(M.state.scan.queue) do
+  queued[step.kind] = queued[step.kind] + 1
+  if step.kind == "set" then lastSet = i elseif not firstInfo then firstInfo = i end
+end
+check(queued.set == #M.data.setOrder - 1 and #M.data.setOrder == 29, "all 29 sets, one sent and 28 to go")
+check(firstInfo and lastSet < firstInfo, "and every SET before the INFO steps")
+check(M.state.scan.queue[firstInfo].cmd == "talisman info blackdragon", "INFO for the first talisman held and not read")
+game(SET_DRAGON)
+check(SENT[8] == "talisman set azatlan", "a SET read, the next is sent")
+check(#M.data.sets.dragon.talismans == 6, "and the set's talismans are kept, for its marks")
+check(M.data.focus == "", "a full scan's SET does not turn the window to that set")
+-- A SET in the game's shape for a set SETS listed, one made-up talisman.
+local function setReply(kw)
+  local name = M.data.sets[kw].name
+  return table.concat({
+    "Name: " .. name, "Partial name: " .. kw,
+    "Description: A set made up for the test.", "Talismans:",
+    "a " .. name .. " Talisman (" .. kw .. "one)", PROMPT,
+  }, "\n")
+end
+-- A SET typed for another set while the scan waits on Azatlan is not its
+-- answer, and is shown but for its Name: line.
+local waiting = #SENT
+local typedSet = setReply("war")
+local shownSet = game(typedSet)
+check(#SENT == waiting and M.state.scan.step.cmd == "talisman set azatlan",
+      "a SET for another set does not answer the scan's")
+check(#shownSet == select(2, typedSet:gsub("\n", "")) and shownSet[1] == "Partial name: war",
+      "and is shown, but for its Name: line")
+-- Every set answered in turn, each hidden, and the scan goes through all.
+local answered = 0
+while M.state.scan.step.kind == "set" do
+  local kw = M.state.scan.step.cmd:match("^talisman set (%S+)$")
+  local left = game(setReply(kw))
+  check(#left == 0, "SET " .. kw .. " in a full scan leaves nothing on the screen, got " .. table.concat(left, " / "))
+  answered = answered + 1
+end
+check(answered == 28, "all 28 sets after Dragon answered, got " .. answered)
+check(M.data.sets.empires.talismans[1].kw == "empiresone", "and kept")
+check(SENT[#SENT] == "talisman info blackdragon", "the INFO steps come after the sets")
+local sentNow = #SENT
 game(INFO_RED)   -- not the one asked for: the scan keeps waiting
-check(#SENT == 7, "an answer to something else does not move the scan on")
+check(#SENT == sentNow, "an answer to something else does not move the scan on")
 fireTimers()
-check(SENT[8] == "talisman info golddragon", "a step not answered in time is skipped")
-local infos = 0
-for _, c in ipairs(SENT) do if c:find("^talisman info ") then infos = infos + 1 end end
+check(SENT[#SENT] == "talisman info golddragon", "a step not answered in time is skipped")
+sentNow = #SENT
 check(M.stopScan(true) and M.state.scan == nil, "stop")
 fireTimers()
-check(#SENT == 8, "a stopped scan sends nothing more")
+check(#SENT == sentNow, "a stopped scan sends nothing more")
 
 SENT = {}
 M.scan("dragon")
@@ -960,6 +1105,76 @@ M.state.asked = nil
 
 -- --------------------------------------------------------- saving, loading
 
+-- The scroll bar shows only when there is more than the window shows.
+do
+  M.data.shown = true
+  COLUMNS, CELL, ROWS = 80, 8, 200
+  fireTimers()
+  M.redraw()
+  check(SCROLLBAR[M.WINDOW] == false, "everything fits: no bar")
+  local drawn = M.state.drawnLines
+  check(drawn > 5, "the lines drawn are counted, got " .. tostring(drawn))
+  fireTimers()   -- the measure after the bar went: same width, same lines
+  local changes = BAR_CHANGES
+  M.redraw()
+  fireTimers()
+  check(BAR_CHANGES == changes, "a redraw that still fits leaves the bar alone")
+  -- 16-pixel lines: rows from getRowCount n are (n - 0.5)(15.5)/16, floored.
+  -- 16-pixel lines: a row count of n is (n - 0.5)(15.5)/16 rows, floored.
+  ROWS = 50
+  check(M.rows(M.WINDOW) == math.floor(49.5 * 15.5 / 16), "rows are what fit for certain")
+  -- The smallest row count that fits the lines drawn, and the one under it.
+  local fits = 2
+  repeat fits = fits + 1; ROWS = fits until M.rows(M.WINDOW) >= drawn
+  M.redraw()
+  check(SCROLLBAR[M.WINDOW] == false, "just enough rows: no bar")
+  check(not WINDOWS[M.WINDOW]:find("more above", 1, true), "and no line saying there is more")
+  ROWS = fits - 1
+  M.redraw()
+  check(SCROLLBAR[M.WINDOW] == true, "more lines than fit for certain: the bar")
+  -- Too short: the foot says there is more, with the top's two links, on
+  -- the empty line the drawing ends on.
+  local w = WINDOWS[M.WINDOW]
+  local foot = "\n<gold>↑ <dim_grey>more above  <cyan>[scan] <cyan>[all]"
+  check(w:sub(-#foot) == foot, "a line at the foot says there is more: " .. w:sub(-80))
+  local footLinks = {}
+  for i = #LINKS - 1, #LINKS do footLinks[#footLinks + 1] = LINKS[i].code end
+  check(footLinks[1] == "AchaeaTalismans.scan()" and footLinks[2] == "AchaeaTalismans.setFocus('')", "and its links are the top's")
+  check(M.state.drawnLines == drawn, "it adds no line")
+  -- In a focused set, the set's own two.
+  M.data.focus = "dragon"
+  ROWS = 3
+  M.redraw()
+  local setFoot = "↑ <dim_grey>more above  <cyan>[scan set] <cyan>[back to sets]"
+  check(WINDOWS[M.WINDOW]:sub(-#setFoot) == setFoot, "a set's foot has its own links")
+  M.data.focus = ""
+  ROWS = fits - 1
+  M.redraw()
+  -- The window made taller, at the same width: the bar and the foot go.
+  ROWS = 200
+  raise("sysUserWindowResizeEvent", 600, 2000, M.WINDOW)
+  fireTimers()
+  check(SCROLLBAR[M.WINDOW] == false, "a taller window drops the bar")
+  check(not WINDOWS[M.WINDOW]:find("more above", 1, true), "and the foot")
+  -- Taller still, nothing to change: neither drawn again nor the bar touched.
+  local links, changes = #LINKS, BAR_CHANGES
+  ROWS = 300
+  raise("sysUserWindowResizeEvent", 600, 3000, M.WINDOW)
+  fireTimers()
+  check(#LINKS == links and BAR_CHANGES == changes, "a resize that changes nothing draws nothing")
+  -- And shorter again: both come back.
+  ROWS = fits - 1
+  raise("sysUserWindowResizeEvent", 600, 200, M.WINDOW)
+  fireTimers()
+  check(SCROLLBAR[M.WINDOW] == true and WINDOWS[M.WINDOW]:find("more above", 1, true), "a shorter window gets both back")
+  -- A window that cannot say its rows keeps the bar.
+  ROWS = nil
+  M.redraw()
+  check(SCROLLBAR[M.WINDOW] == true, "rows unknown: the bar stays")
+  fireTimers()
+  COLUMNS, CELL = nil, nil
+end
+
 local saved = SAVED
 STORED = {}
 for k, v in pairs(saved) do STORED[k] = v end
@@ -1035,7 +1250,7 @@ check(SENT[3] == "talisman pieces", "and the scan read it, and went on")
 local scanPieces = reply(PIECES):gsub("\nmore\n", "\n")
 shown = game(scanPieces)
 check(#shown == 0, "nor does PIECES, with its three pages, got " .. any(shown))
-check(#M.data.held > 0 and SENT[#SENT]:find("^talisman info "), "PIECES was read, and INFO is next")
+check(#M.data.held > 0 and SENT[#SENT] == "talisman set dragon", "PIECES was read, and the sets are next")
 M.stopScan(true)
 
 -- A set scan, to its end: SET, PIECES, then INFO for each of its six

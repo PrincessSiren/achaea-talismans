@@ -50,8 +50,8 @@ COMBINE and SPLIT commands that get it there are still yours to type.
   tals show|hide       the window
   tals all             the window lists every talisman you hold pieces of
   tals set &lt;set&gt;       the window lists one set's talismans
-  tals scan            TALISMAN LIST and PIECES, then INFO for each talisman
-                       you hold pieces of and have not read yet
+  tals scan            TALISMAN LIST and PIECES, SET for every set, then INFO
+                       for each talisman you hold pieces of and have not read
   tals scan &lt;set&gt;      TALISMAN SET &lt;set&gt; and PIECES, then INFO for each of its
                        talismans
   tals stop            stop a scan
@@ -62,7 +62,7 @@ COMBINE and SPLIT commands that get it there are still yours to type.
 AchaeaTalismans = AchaeaTalismans or {}
 local M = AchaeaTalismans
 
-M.VERSION = "0.3.0"
+M.VERSION = "0.4.0"
 M.BUILD = M.BUILD or "source"   -- build.py replaces this
 
 -- The name Mudlet knows the package by, which is what its uninstall event
@@ -845,6 +845,8 @@ end
 M.BAR = 10
 -- Spaces between two columns of the layout.
 M.GAP = 3
+-- The fewest marks a line of a set may hold before the sets go to one column.
+M.MIN_MARKS = 4
 -- The width drawn to when the window cannot be measured.
 M.DEFAULT_WIDTH = 80
 local MARK = { done = "&lt;green&gt;●", started = "&lt;yellow&gt;◐", none = "&lt;dim_grey&gt;○" }
@@ -929,6 +931,22 @@ function M.layout(blocks, width, sep)
     local w = M.GAP * (#cols - 1)
     for _, col in ipairs(cols) do w = w + col.w end
     if w &lt;= width then return cols end
+  end
+  return stack(blocks, total, sep)
+end
+
+--- Lay blocks out in at most n columns read top to bottom, as short as that
+--- allows. Blocks are never split, so a column may come out a line longer
+--- than the other.
+function M.layoutInto(blocks, n, sep)
+  local tallest, total = 0, 0
+  for i, b in ipairs(blocks) do
+    if #b &gt; tallest then tallest = #b end
+    total = total + #b + (i &gt; 1 and gapAfter(blocks[i - 1], sep) or 0)
+  end
+  for height = tallest, total do
+    local cols = stack(blocks, height, sep)
+    if #cols &lt;= n then return cols end
   end
   return stack(blocks, total, sep)
 end
@@ -1044,7 +1062,7 @@ function M.render(width)
   else
     add("&lt;dim_grey&gt;  pieces not read yet  ")
   end
-  link("&lt;cyan&gt;[scan]", "AchaeaTalismans.scan()", "send TALISMAN LIST and PIECES, then INFO for what you hold")
+  link("&lt;cyan&gt;[scan]", "AchaeaTalismans.scan()", "send TALISMAN LIST, PIECES and SET for every set, then INFO for what you hold")
   add(" ")
   link("&lt;cyan&gt;[all]", "AchaeaTalismans.setFocus('')", "the pieces you hold, and every set")
   add("\n\n")
@@ -1135,47 +1153,169 @@ function M.render(width)
     add("\n&lt;white&gt;Sets&lt;reset&gt;  &lt;dim_grey&gt;click one to list its talismans\n")
     local nw = 1
     for _, kw in ipairs(d.setOrder) do nw = math.max(nw, #(d.sets[kw].name or kw)) end
-    local rows = {}
+    -- Two columns, each half the window, and a set's marks wrap within its
+    -- column, under the first of them, rather than widen it: the longest
+    -- set has 19 talismans, and one wide row would make every row in its
+    -- column as wide. A window too narrow to show a few marks a line in
+    -- half of it gets one column of its full width instead.
+    local lead = nw + 1 + 5 + 1   -- name, a space, the counts padded, a space
+    local columns, colW = 2, math.floor((width - M.GAP) / 2)
+    if colW - lead &lt; M.MIN_MARKS then columns, colW = 1, width end
+    local perLine = math.max(1, colW - lead)
+    local blocks = {}
     for _, kw in ipairs(d.setOrder) do
       local set = d.sets[kw]
       local line = putLink(newLine(), "&lt;reset&gt;" .. pad(set.name or kw, nw), "AchaeaTalismans.setFocus(" .. q(kw) .. ")",
         "list the " .. (set.name or kw) .. " set")
       -- A set read by TALISMAN SET alone has no counts yet.
       local counts = set.total and (fmt(set.done or 0) .. "/" .. fmt(set.total)) or "?"
-      local marks = " &lt;dim_grey&gt;" .. counts
+      local block = {}
       if set.talismans then
-        marks = " &lt;dim_grey&gt;" .. pad(counts, 5) .. " "
-        for _, t in ipairs(set.talismans) do marks = marks .. MARK[M.status(t.kw)] end
+        put(line, " &lt;dim_grey&gt;" .. pad(counts, 5) .. " ")
+        local marks = {}
+        for _, t in ipairs(set.talismans) do marks[#marks + 1] = MARK[M.status(t.kw)] end
+        local i = 1
+        repeat
+          put(line, table.concat(marks, "", i, math.min(#marks, i + perLine - 1)))
+          i = i + perLine
+          block[#block + 1] = line
+          if i &lt;= #marks then line = put(newLine(), string.rep(" ", lead)) end
+        until i &gt; #marks
+      else
+        block[1] = put(line, " &lt;dim_grey&gt;" .. counts)
       end
-      rows[#rows + 1] = { put(line, marks) }
+      blocks[#blocks + 1] = block
     end
-    M.emit(out, M.layout(rows, width, 0))
+    M.emit(out, M.layoutInto(blocks, columns, 0))
   else
     add("\n&lt;dim_grey&gt;Sets not read yet. TALISMAN SETS, or [scan].\n")
   end
   return out
 end
 
---- How many columns the window can show. getColumnCount rounds up where the
---- text is cut off, so one comes off. The main console (nil) is drawn at the
---- default, and so is a window not there yet, for which getColumnCount raises.
+--- The width in pixels of one character cell in a window, as Mudlet draws
+--- it: calcFontSize(win, true), new in 5.1. Nil before 5.1, which raises
+--- for that form; the width of a "W" that 5.0 offers instead is not the
+--- cell in a proportional font, and the package is written for 5.1.
+function M.cellWidth(win)
+  if type(calcFontSize) ~= "function" then return nil end
+  local ok, w = pcall(calcFontSize, win, true)
+  if ok and type(w) == "number" and w &gt; 0 then return w end
+  return nil
+end
+
+--- How many columns the window can show, all of them in full.
+---
+--- getColumnCount is not that. It is the window's width over the font's
+--- average character width as a fraction (QFontMetricsF), rounded, while
+--- every character is drawn in a cell as wide as that average rounded to a
+--- whole pixel (TTextEdit's mFontWidth, in 5.0.1 and 5.1.0 alike). With an
+--- average of 7.6 drawn at 8, it counts five columns in a hundred too many,
+--- and a layout fitted to it ran past the window's right edge.
+---
+--- From what it does say: the width is at least (n - 0.5) averages, and the
+--- average is at least the cell less half a pixel. So (n - 0.5)(cell - 0.5)
+--- pixels are there for certain, which is that over the cell in columns. It
+--- may give up a column or two that would have fit; it never draws past the
+--- edge. With no cell width to go on (before 5.1), one column comes off,
+--- which is not certain to fit.
+---
+--- The main console (nil) is drawn at the default, and so is a window not
+--- there yet, for which getColumnCount raises.
 function M.width(win)
   if win then
     local ok, n = pcall(getColumnCount, win)
-    if ok and type(n) == "number" and n &gt; 1 then return math.max(20, math.floor(n) - 1) end
+    if ok and type(n) == "number" and n &gt; 1 then
+      local cell = M.cellWidth(win)
+      if cell and cell &gt; 1 then
+        return math.max(20, math.floor((n - 0.5) * (cell - 0.5) / cell))
+      end
+      return math.max(20, math.floor(n) - 1)
+    end
   end
   return M.DEFAULT_WIDTH
 end
 --- Draw the pieces M.render made into a window, or the main console for nil.
+--- Returns how many lines that takes, counting the empty one a closing
+--- newline leaves.
 function M.draw(win)
-  for _, piece in ipairs(M.render(M.width(win))) do
+  return M.drawPieces(win, M.render(M.width(win)))
+end
+
+--- The line under everything when the window is too short for it all: the
+--- top is what scrolls out of sight, so this says there is more and repeats
+--- the top's two links.
+function M.moreAbove()
+  local d = M.data
+  -- The arrow in the package's own gold, the colour of its [tals] lines:
+  -- cyan is a link here, green and yellow are marks, white is a heading.
+  local out = { "&lt;gold&gt;↑ &lt;dim_grey&gt;more above  " }
+  if d.focus ~= "" then
+    out[#out + 1] = { "&lt;cyan&gt;[scan set]", "AchaeaTalismans.scan(" .. q(d.focus) .. ")",
+      "send TALISMAN SET and PIECES, then INFO for each of its talismans" }
+    out[#out + 1] = " "
+    out[#out + 1] = { "&lt;cyan&gt;[back to sets]", "AchaeaTalismans.setFocus('')",
+      "every talisman you hold pieces of, and every set" }
+  else
+    out[#out + 1] = { "&lt;cyan&gt;[scan]", "AchaeaTalismans.scan()",
+      "send TALISMAN LIST, PIECES and SET for every set, then INFO for what you hold" }
+    out[#out + 1] = " "
+    out[#out + 1] = { "&lt;cyan&gt;[all]", "AchaeaTalismans.setFocus('')", "the pieces you hold, and every set" }
+  end
+  return out
+end
+
+--- Draw pieces as M.render makes them; returns the lines drawn, as M.draw.
+function M.drawPieces(win, pieces)
+  local lines = 1
+  for _, piece in ipairs(pieces) do
     if type(piece) == "table" then
       if win then cechoLink(win, piece[1], piece[2], piece[3], true)
       else cechoLink(piece[1], piece[2], piece[3], true) end
     else
       if win then cecho(win, piece) else cecho(piece) end
+      lines = lines + select(2, piece:gsub("\n", ""))
     end
   end
+  return lines
+end
+
+--- How many lines the window shows in full, or nil if it cannot be told.
+--- getRowCount has getColumnCount's fault, the other way up: the height
+--- over the font's line spacing as a fraction, rounded, where each line is
+--- drawn as tall as the font's height in whole pixels (mFontHeight, both
+--- tags), which calcFontSize gives as its second value. So the same bound:
+--- (n - 0.5)(height - 0.5) pixels are there for certain.
+function M.rows(win)
+  local ok, n = pcall(getRowCount, win)
+  if not (ok and type(n) == "number" and n &gt; 1) then return nil end
+  local h
+  if type(calcFontSize) == "function" then
+    local okH, _, height = pcall(calcFontSize, win)
+    if okH and type(height) == "number" and height &gt; 1 then h = height end
+  end
+  if h then return math.floor((n - 0.5) * (h - 0.5) / h) end
+  return math.floor(n) - 1
+end
+
+--- Show the scroll bar only when there is more than the window shows. Mudlet
+--- hides a user window's bar until asked (TConsole, both tags), and with it
+--- hidden a window too short cut off its top with no sign of more.
+---
+--- Turning the bar on or off changes the width, so the window is measured
+--- again after, and may be redrawn. That cannot flip back and forth: a
+--- wider window never needs more lines, so a bar turned off stays off, and
+--- a narrower one never fewer, so a bar turned on stays on. When the lines
+--- shown cannot be told, the bar is on.
+function M.fitScrollBar(lines)
+  local rows = M.rows(M.WINDOW)
+  local want = rows == nil or lines &gt; rows
+  if want == S.scrollBar then return false end
+  S.scrollBar = want
+  pcall(want and enableScrollBar or disableScrollBar, M.WINDOW)
+  -- The bar gives or takes the text's width, laid out after this returns.
+  M.onResize(nil, nil, nil, M.WINDOW)
+  return true
 end
 
 --- Open the window, or show it again if it was closed. No dock area is
@@ -1187,6 +1327,8 @@ function M.open()
   openUserWindow(M.WINDOW, true, true)
   pcall(setUserWindowTitle, M.WINDOW, "Talismans")
   S.opened = true
+  -- Whatever an earlier copy left the bar at, the first draw sets it.
+  S.scrollBar = nil
 end
 
 --- Draw what is known into the window. It is opened only the first time,
@@ -1201,8 +1343,20 @@ function M.redraw()
   S.drawnWidth = M.width(M.WINDOW)
   pcall(setWindowWrap, M.WINDOW, S.drawnWidth)
   clearWindow(M.WINDOW)
-  M.draw(M.WINDOW)
+  S.drawnLines = M.draw(M.WINDOW)
+  -- Too short for it all, as far as can be told: a line at the foot says
+  -- so. It goes on the empty line the drawing ends on, so it adds none.
+  S.overflow = M.overflows(S.drawnLines)
+  if S.overflow then M.drawPieces(M.WINDOW, M.moreAbove()) end
+  M.fitScrollBar(S.drawnLines)
   return true
+end
+
+--- Whether this many lines are more than the window shows for certain. Not
+--- when that cannot be told: the scroll bar is up then, and says enough.
+function M.overflows(lines)
+  local rows = M.rows(M.WINDOW)
+  return rows ~= nil and lines &gt; rows
 end
 
 -- How long a resize has to settle before the window is laid out again:
@@ -1210,13 +1364,20 @@ end
 M.RESIZE_WAIT = 0.25
 
 --- Lay the window out again once it has been resized to a different number
---- of columns.
+--- of columns, or, at the same width, see whether it still needs its bar.
 function M.onResize(_, _, _, name)
   if name ~= M.WINDOW or not M.data.shown then return false end
   if S.resizeTimer then pcall(killTimer, S.resizeTimer) end
   S.resizeTimer = tempTimer(M.RESIZE_WAIT, function()
     S.resizeTimer = nil
-    if M.width(M.WINDOW) ~= S.drawnWidth then M.redraw() end
+    -- Drawn again for a new width, or for the line at the foot coming or
+    -- going; otherwise only the bar is looked at.
+    if M.width(M.WINDOW) ~= S.drawnWidth
+        or (S.drawnLines and M.overflows(S.drawnLines) ~= S.overflow) then
+      M.redraw()
+    elseif S.drawnLines then
+      M.fitScrollBar(S.drawnLines)
+    end
   end)
   return true
 end
@@ -1309,7 +1470,9 @@ function M.scan(setKw)
     -- LIST rather than SETS: it prints the same sets table, after the
     -- talismans you have done, which is the only place those are listed.
     queue = {
-      { cmd = "talisman list", kind = "sets", kinds = { tlist = true } },
+      -- After LIST, SET for every set it listed: the only listing that says
+      -- which talismans a set holds, and so the marks beside each set.
+      { cmd = "talisman list", kind = "sets", kinds = { tlist = true }, then_ = "allSets" },
       { cmd = "talisman pieces", kind = "pieces", then_ = "heldInfo" },
     }
     log("Scan started")
@@ -1323,6 +1486,8 @@ end
 function M.scanWaitsFor(cap)
   local step = S.scan and S.scan.step
   if not (step and step.kind == cap.kind) then return false end
+  -- A full scan's SET for some other set, typed meanwhile, is not the answer.
+  if step.setName then return (cap.name or ""):lower() == step.setName:lower() end
   -- INFO for some other talisman, typed meanwhile, is not the answer.
   return not step.kw or cap.kw == step.kw
 end
@@ -1334,7 +1499,20 @@ function M.scanHeard(cap)
   if scan.timer then pcall(killTimer, scan.timer); scan.timer = nil end
   scan.heard = scan.heard + 1
   local after = scan.step.then_
-  if after == "heldInfo" then
+  if after == "allSets" then
+    -- Before the INFO steps, which PIECES adds after this. Each SET records
+    -- its talismans and nothing more: INFO for every talisman of every set
+    -- would be hundreds of commands.
+    -- Each waits for its own set, by the name SETS gave it, which SET's
+    -- "Name:" line repeats: a SET typed meanwhile for another set is not the
+    -- answer, and would put every step after it one answer behind. The name
+    -- rather than the keyword, which SET prints as "Partial name" and which
+    -- is only known to match for the sets captured.
+    for _, kw in ipairs(M.data.setOrder) do
+      local set = M.data.sets[kw]
+      scan.queue[#scan.queue + 1] = { cmd = "talisman set " .. kw, kind = "set", setName = set and set.name }
+    end
+  elseif after == "heldInfo" then
     local todo = {}
     for _, tkw in ipairs(M.heldTalismans()) do
       if not M.data.talismans[tkw] then todo[#todo + 1] = tkw end
@@ -1511,6 +1689,10 @@ function M.diag()
   echo("  completed: " .. count(M.data.completed) .. " talismans\n")
   echo("  window:    " .. (M.data.shown and "shown" or "hidden") ..
        ", " .. (M.data.focus ~= "" and ("set " .. M.data.focus) or "all held") .. "\n")
+  local okCols, cols = pcall(getColumnCount, M.WINDOW)
+  echo("  width:     " .. M.width(M.WINDOW) .. " columns drawn; getColumnCount " ..
+       tostring(okCols and cols or "unavailable") .. ", cell " ..
+       tostring(M.cellWidth(M.WINDOW) or "unknown") .. " px\n")
   echo("  reading:   " .. (S.cap and (S.cap.kind .. (S.cap.paused and ", paged" or "")) or "nothing") ..
        "; " .. S.read .. " outputs read since start\n")
   echo("  scan:      " .. (S.scan and ((S.scan.step and S.scan.step.cmd or "between steps") ..
@@ -1579,13 +1761,13 @@ M.start()
 if M.data.shown then pcall(M.redraw) end
 
 -- Generated by build.py from its ALIASES table. Do not edit here.
-AchaeaTalismans.BUILD = "09bda2cc"
+AchaeaTalismans.BUILD = "59c787a0"
 AchaeaTalismans.COMMANDS = {
     { usage = "tals", help = "show the window, what has been read so far, and this list" },
     { usage = "tals show|hide", help = "open or close the window" },
     { usage = "tals all", help = "list every talisman you hold pieces of" },
     { usage = "tals set &lt;set&gt;", help = "list one set's talismans instead" },
-    { usage = "tals scan", help = "send TALISMAN LIST and PIECES, then INFO for what you hold" },
+    { usage = "tals scan", help = "send TALISMAN LIST, PIECES and SET for every set, then INFO for what you hold" },
     { usage = "tals scan &lt;set&gt;", help = "send TALISMAN SET &lt;set&gt; and PIECES, then INFO for each of its talismans" },
     { usage = "tals stop", help = "stop a scan" },
     { usage = "tals diag", help = "build stamp, what is stored, where it is saved" },
