@@ -45,7 +45,8 @@ COMBINE and SPLIT commands that get it there are still yours to type.
   tals set <set>       the window lists one set's talismans
   tals scan            TALISMAN LIST and PIECES, then INFO for each talisman
                        you hold pieces of and have not read yet
-  tals scan <set>      TALISMAN SET <set>, then INFO for each of its talismans
+  tals scan <set>      TALISMAN SET <set> and PIECES, then INFO for each of its
+                       talismans
   tals stop            stop a scan
   tals diag            build stamp, what is stored, where
 
@@ -722,6 +723,14 @@ function M.feed(text)
   if cap then
     local verdict = READ[cap.kind](cap, l)
     if verdict == nil then
+      -- "Name:" opens SET and INFO alike, and only the line after says which,
+      -- and for INFO which talisman. One the scan did not ask for, typed or
+      -- otherwise, is shown from here on. Its "Name:" line was already hidden
+      -- and cannot be put back.
+      if cap.hide and not cap.claimed and (cap.kind == "set" or cap.kind == "info") then
+        cap.claimed = true
+        if not M.scanWaitsFor(cap) then cap.hide, cap.fromScan = false, false end
+      end
       local foreign = cap.foreign
       cap.foreign = nil
       return cap.hide and not foreign or false
@@ -1028,7 +1037,7 @@ function M.render(width)
   else
     add("<dim_grey>  pieces not read yet  ")
   end
-  link("<cyan>[scan]", "AchaeaTalismans.scan()", "send TALISMAN SETS, PIECES, and INFO for what you hold")
+  link("<cyan>[scan]", "AchaeaTalismans.scan()", "send TALISMAN LIST and PIECES, then INFO for what you hold")
   add(" ")
   link("<cyan>[all]", "AchaeaTalismans.setFocus('')", "the pieces you hold, and every set")
   add("\n\n")
@@ -1047,7 +1056,7 @@ function M.render(width)
     local name = set and set.name or d.focus
     local done = (set and set.total) and ("  " .. fmt(set.done) .. "/" .. fmt(set.total) .. " done") or ""
     add("<white>" .. name .. "<reset>" .. done .. "  ")
-    link("<cyan>[scan set]", "AchaeaTalismans.scan(" .. q(d.focus) .. ")", "send TALISMAN SET and INFO for each of its talismans")
+    link("<cyan>[scan set]", "AchaeaTalismans.scan(" .. q(d.focus) .. ")", "send TALISMAN SET and PIECES, then INFO for each of its talismans")
     add(" ")
     link("<cyan>[back to sets]", "AchaeaTalismans.setFocus('')", "every talisman you hold pieces of, and every set")
     list = M.listed()
@@ -1268,7 +1277,12 @@ function M.scanSummary(scan)
 end
 
 function M.scan(setKw)
-  M.stopScan(true)
+  -- One at a time. A second would leave the first's listing half read and
+  -- on the screen, and a double click on [scan] would send everything twice.
+  if S.scan then
+    log("A scan is already running; `tals stop` ends it")
+    return false
+  end
   -- Whatever was half read before is not what the scan will be waiting for.
   S.cap, S.paging, S.answered = nil, false, false
   endTail()
@@ -1276,7 +1290,12 @@ function M.scan(setKw)
   if setKw and setKw ~= "" then
     setKw = setKw:lower()
     set = setKw
-    queue = { { cmd = "talisman set " .. setKw, kind = "set", then_ = "setInfo" } }
+    -- PIECES as well, so the count it ends on is one it read. Its INFO
+    -- steps are added after this, once SET says which talismans to ask for.
+    queue = {
+      { cmd = "talisman set " .. setKw, kind = "set", then_ = "setInfo" },
+      { cmd = "talisman pieces", kind = "pieces" },
+    }
     log("Scan started (set " .. setKw .. ")")
     M.data.focus = M.data.sets[setKw] and setKw or M.data.focus
   else
@@ -1293,12 +1312,18 @@ function M.scan(setKw)
   return true
 end
 
+--- Whether the scan's step in flight is waiting for this capture.
+function M.scanWaitsFor(cap)
+  local step = S.scan and S.scan.step
+  if not (step and step.kind == cap.kind) then return false end
+  -- INFO for some other talisman, typed meanwhile, is not the answer.
+  return not step.kw or cap.kw == step.kw
+end
+
 --- A capture was read; if the scan was waiting for one like it, move on.
 function M.scanHeard(cap)
   local scan = S.scan
-  if not (scan and scan.step and scan.step.kind == cap.kind) then return false end
-  -- INFO for some other talisman, typed meanwhile, is not the answer.
-  if scan.step.kw and cap.kw ~= scan.step.kw then return false end
+  if not M.scanWaitsFor(cap) then return false end
   if scan.timer then pcall(killTimer, scan.timer); scan.timer = nil end
   scan.heard = scan.heard + 1
   local after = scan.step.then_
@@ -1327,6 +1352,9 @@ function M.scanTimeout()
   if not scan then return end
   scan.timer = nil
   scan.missed = scan.missed + 1
+  -- A page it answered and never saw continued (a disconnect between the
+  -- MORE and its answer) is not the scan's any more: its prompts are shown.
+  S.answered = false
   if scan.step then scan.unanswered[#scan.unanswered + 1] = scan.step.cmd end
   scan.step = nil
   scanSend()
@@ -1337,6 +1365,7 @@ function M.stopScan(quiet)
   if not scan then return false end
   if scan.timer then pcall(killTimer, scan.timer) end
   S.scan = nil
+  S.answered = false
   if not quiet then log("Scan stopped") end
   return true
 end

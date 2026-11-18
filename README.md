@@ -62,7 +62,7 @@ closed until you ask for it again (`tals`, `tals show`, `tals set`).
 | `tals all` | list every talisman you hold pieces of |
 | `tals set <set>` | list one set's talismans instead |
 | `tals scan` | send `TALISMAN LIST` and `TALISMAN PIECES`, then `TALISMAN INFO` for each talisman you hold pieces of and have not read yet |
-| `tals scan <set>` | send `TALISMAN SET <set>`, then `TALISMAN INFO` for each of its talismans |
+| `tals scan <set>` | send `TALISMAN SET <set>` and `TALISMAN PIECES`, then `TALISMAN INFO` for each of its talismans |
 | `tals stop` | stop a scan |
 | `tals diag` | the build stamp, what is stored, and where it is saved |
 
@@ -87,7 +87,8 @@ LIST`'s tables. It answers nothing else: a help scroll or any other output
 paged meanwhile is left to you. A listing of that kind you type
 yourself mid-scan cannot be told apart from the scan's own, so it may be
 paged on too. A step with no answer in 8 seconds is skipped. `tals stop`
-ends a scan, and nothing more is sent after that.
+ends a scan, and nothing more is sent after that. One scan runs at a time:
+`tals scan` while one is running sends nothing and says so.
 
 **A scan is silent.** What the game answers it with is read and taken off
 the screen: the listings, the page breaks it answers, and the prompt after
@@ -98,15 +99,30 @@ each. The window is where they show. A scan prints two lines of its own:
 [tals] Scan completed (42 pieces found)
 ```
 
-The count is the pieces you hold, one per piece whatever its level; after
-`tals scan <set>`, only those toward that set. A step the game did not answer
-in time is named on the second line (`Not answered: talisman info
-golddragon`). What it cannot place in one of its listings is left alone, so a
-tell or an attack that arrives mid-scan is shown, and so is an answer it does
-not read, such as an error for a keyword the game does not know. A listing
-you type yourself is always shown, with the same exception as above: the
-same listing typed while the scan is waiting for it is taken for the
-scan's.
+The count is the pieces the scan's `TALISMAN PIECES` listed, one per piece
+whatever its level; after `tals scan <set>`, only those toward that set. A
+step the game did not answer in time is named on the second line (`Not
+answered: talisman info golddragon`). What it cannot place in one of its
+listings is left alone, so a tell or an attack that arrives mid-scan is
+shown, and so is an answer it does not read, such as an error for a keyword
+the game does not know.
+
+A listing you type yourself mid-scan is shown, with two exceptions:
+
+- **The same listing the scan is waiting for** is taken for the scan's, and
+  hidden, as above.
+- **`TALISMAN INFO` or `TALISMAN SET` loses its first line** while the scan
+  waits on an INFO or a SET. Both open with a `Name:` line, and only the line
+  after it says which listing it is and, for INFO, which talisman. So the
+  `Name:` line is hidden before the package can tell it is not the scan's.
+  Everything after it is shown. Any other output that has a line starting
+  `Name:` loses that line in the same way.
+
+**The prompt is how it knows a listing has ended.** Mudlet marks a prompt
+from the game's GA. With GA turned off, no prompt is ever hidden. Each
+listing's tail, the blank lines after it, is then let go one second after
+the listing ends instead of at its prompt, and a talisman listing that
+arrives in that second is hidden as if it were the scan's.
 
 ## What it keeps
 

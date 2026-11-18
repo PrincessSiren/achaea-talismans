@@ -716,7 +716,8 @@ SENT = {}
 M.scan("dragon")
 check(SENT[1] == "talisman set dragon", "a set scan starts with SET")
 game(SET_DRAGON)
-check(SENT[2] == "talisman info blackdragon", "then INFO for each of its talismans")
+check(SENT[2] == "talisman pieces", "then PIECES, so what it counts is what it read")
+check(M.state.scan.queue[1].cmd == "talisman info blackdragon", "then INFO for each of its talismans")
 check(M.data.focus == "dragon", "and the window turns to it")
 M.stopScan(true)
 
@@ -1037,12 +1038,17 @@ check(#shown == 0, "nor does PIECES, with its three pages, got " .. any(shown))
 check(#M.data.held > 0 and SENT[#SENT]:find("^talisman info "), "PIECES was read, and INFO is next")
 M.stopScan(true)
 
--- A set scan, to its end: SET, then INFO for each of its six talismans.
+-- A set scan, to its end: SET, PIECES, then INFO for each of its six
+-- talismans. Nothing held beforehand: the count is what PIECES says.
 SENT, ECHOED = {}, {}
 M.data.talismans = {}
+M.data.held = {}
 M.scan("dragon")
 shown = game(reply(SET_DRAGON))
 check(#shown == 0, "SET answered to a scan leaves nothing, got " .. any(shown))
+check(SENT[#SENT] == "talisman pieces", "a set scan reads PIECES")
+shown = game(scanPieces)
+check(#shown == 0, "PIECES in a set scan leaves nothing, got " .. any(shown))
 local dragons = { "blackdragon", "golddragon", "bluedragon", "silverdragon", "greendragon", "reddragon" }
 for i, kw in ipairs(dragons) do
   check(SENT[#SENT] == "talisman info " .. kw, "the scan asks for " .. kw)
@@ -1059,8 +1065,10 @@ check(ECHOED[#ECHOED]:find("^<gold>%[tals%]<reset> Scan completed"),
       "written on the empty line, with no blank line above it: " .. ECHOED[#ECHOED])
 local said = table.concat(ECHOED, "\n")
 check(said:find("[tals]<reset> Scan started (set dragon)", 1, true), "a scan says it started")
-check(said:find("[tals]<reset> Scan completed (", 1, true) and said:find(" found for Dragon)", 1, true),
-      "and that it finished, with what it found in the set: " .. said)
+-- The made-up PIECES holds 17 dragon pieces: black 4, gold 3, silver 6,
+-- green 1, red 3.
+check(said:find("[tals]<reset> Scan completed (17 pieces found for Dragon)", 1, true),
+      "and that it finished, with the pieces it read toward the set: " .. said)
 check(not said:find("Not answered", 1, true), "every step answered, so nothing is listed as missed")
 local _, lines = said:gsub("%[tals%]", "")
 check(lines == 2, "two lines, and no more, got " .. lines)
@@ -1076,9 +1084,9 @@ check(M.scanSummary({ unanswered = {} }) == "Scan completed (3 pieces found)", "
 
 -- A step the game never answered is named on the closing line.
 ECHOED = {}
-M.data.held = { { kw = "reddragonclaw", count = 1, level = 3, group = "reddragon" } }
 M.scan("dragon")
 game(reply(SET_DRAGON))
+game(scanPieces)
 fireTimers()   -- blackdragon: no answer
 for i = 2, #dragons do game(infoFor(dragons[i])) end
 check(M.state.scan == nil, "the scan finished past the missed step")
@@ -1087,7 +1095,7 @@ fireTimers()
 LAST_LINE = nil
 check(ECHOED[#ECHOED]:find("^\n<gold>%[tals%]"), "after a line with text on it, a line of its own")
 said = table.concat(ECHOED, "\n")
-check(said:find("Scan completed (1 piece found for Dragon). <red>Not answered: talisman info blackdragon<reset>", 1, true),
+check(said:find("Scan completed (17 pieces found for Dragon). <red>Not answered: talisman info blackdragon<reset>", 1, true),
       "the closing line names what went unanswered, got " .. said)
 
 -- Incomplete talismans come after LIST's sets table, by when the scan has
@@ -1143,6 +1151,52 @@ M.stopScan(true)
 CLOCK = CLOCK + M.TAIL_WAIT + 1
 shown = game(SETS)
 check(#shown == lineCount, "a tail no prompt closed is let go")
+
+-- One scan at a time: a second, or a double click on [scan], sends nothing.
+SENT, ECHOED = {}, {}
+check(M.scan() == true and #SENT == 1, "a scan starts")
+check(M.scan("dragon") == false and #SENT == 1, "a second, while it runs, does not")
+check(table.concat(ECHOED, "\n"):find("already running", 1, true), "and says why")
+M.stopScan(true)
+
+-- A page break the scan answered, and never saw continued: once the scan
+-- gives up on the step, or is stopped, the prompts after are shown again.
+local listUpToBreak = reply(LIST):match("^(.-%[Type MORE[^\n]*)\n")
+check(listUpToBreak, "LIST up to its page break")
+M.scan()
+game(listUpToBreak)
+check(M.state.answered, "the scan answered the break")
+fireTimers()   -- no [File continued via MORE]: the step times out
+shown = game(PROMPT)
+check(#shown == 1, "a prompt after a step given up on is shown")
+M.stopScan(true)
+M.scan()
+game(listUpToBreak)
+M.stopScan(true)
+shown = game(PROMPT)
+check(#shown == 1, "and after a stop")
+game("[File continued via MORE]")
+
+-- INFO or SET the scan did not ask for, typed while it waits on another, is
+-- shown, all but its "Name:" line, which is hidden before the line saying
+-- which listing it is. The scan goes on waiting.
+M.data.talismans = {}
+M.scan("dragon")
+game(reply(SET_DRAGON))
+game(scanPieces)
+check(SENT[#SENT] == "talisman info blackdragon", "the scan waits on blackdragon")
+local sentNow = #SENT
+local typed = infoFor("reddragon")
+local typedLines = select(2, typed:gsub("\n", "")) + 1
+shown = game(typed)
+check(#shown == typedLines - 1 and shown[1] == "Keyword: reddragon",
+      "INFO for another talisman is shown but for its Name: line, got " .. any(shown))
+check(#SENT == sentNow and M.state.scan.step.kw == "blackdragon", "and the scan still waits")
+shown = game(reply(SET_DRAGON))
+check(#shown == select(2, reply(SET_DRAGON):gsub("\n", "")), "a SET typed meanwhile is shown, but for its Name: line")
+shown = game(infoFor("blackdragon"))
+check(#shown == 0, "the one it waits for is still hidden")
+M.stopScan(true)
 
 -- -------------------------------------------------------------- uninstall
 
