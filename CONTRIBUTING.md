@@ -118,10 +118,19 @@ from that tag, checks the committed `.xml` matches it, and attaches it to the
 release.
 
 Publishing to the Mudlet package repository is a further step, gated on a
-repository variable `PUBLISH_TO_MUDLET`, which is not set yet. It needs this
-repository listed in that repository's `trusted-publishers.json` first, which
+repository variable `PUBLISH_TO_MUDLET`, set to `true` since 0.4.3. It needs
+this repository listed in that repository's `trusted-publishers.json`, which
 pins the owner, the repo and the workflow file by path. So **renaming
 `release.yml` revokes publishing** until that entry is amended.
+
+That repository's `check-mpackage-contents` flags a `sysDataSendRequest`
+handler as a questionable event to validate by hand, and this package has one:
+`M.start` registers it, to hand each command you send to `M.onSend`, which
+notices the talisman commands you type. The first publish was checked whole
+and failed it; a later one is compared with the version before it, and fails
+only when its diff, with 20 lines of context, reaches the line in `M.start`
+that registers the handler. `M.onSend` itself is far enough away not to count.
+A publish that fails it waits for a maintainer to merge it.
 
 Each publish opens a pull request there. What follows is that repository's
 behaviour as AchaeaHidden's releases met it, not something this one controls:

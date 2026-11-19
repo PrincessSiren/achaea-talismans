@@ -448,6 +448,21 @@ check(harness.brief:find("^SHAKE <harness>") and harness.brief:find("reach the w
 check(harness.set == "elemental", "its set")
 check(M.status("harness") == "none", "no harness piece held")
 
+-- An INFO cut short before its Set: line, here by a tell, is not the
+-- talisman, and does not replace what INFO read before.
+local cut = {}
+for l in INFO_RED:gmatch("[^\n]+") do
+  if l == "Set: Dragon" then break end
+  cut[#cut + 1] = l
+  if l:find("reddragontooth", 1, true) then cut[#cut + 1] = 'Someone tells you, "Hello."' end
+end
+local cutShown = game(table.concat(cut, "\n"))
+red = M.data.talismans.reddragon
+check(#red.pieces == 8 and red.set == "Dragon", "an INFO cut short does not replace a full one")
+check(#cutShown == #cut and table.concat(cutShown, "\n"):find("tells you", 1, true),
+      "a typed INFO is shown whole, the line that cut it included")
+check(M.state.cap == nil, "nothing is left being read")
+
 -- A piece held above the level asked for fills the slot: split it down.
 M.data.talismans.test = { name = "t", pieces = { { kw = "silverdragonscale", level = 3, count = 1 } } }
 check(M.progress("test").ready == 1 and M.progress("test").have == 4, "a level-4 piece covers a level-3 slot, counted at 4")
@@ -824,7 +839,10 @@ check(M.state.cap == nil and #M.data.held == heldNow, "a stale page is not finis
 -- --------------------------------------------------------------------- scan
 
 SENT = {}
-M.data.talismans = { reddragon = M.data.talismans.reddragon }
+M.data.talismans = {
+  reddragon = M.data.talismans.reddragon,
+  silverdragon = { name = "a Silver Dragon Talisman", pieces = { { count = 1, kw = "silverdragonclaw", level = 7 } } },
+}
 M.scan()
 check(SENT[1] == "talisman list" and #SENT == 1, "a scan starts with LIST")
 game(LIST)
@@ -842,6 +860,10 @@ end
 check(queued.set == #M.data.setOrder - 1 and #M.data.setOrder == 29, "all 29 sets, one sent and 28 to go")
 check(firstInfo and lastSet < firstInfo, "and every SET before the INFO steps")
 check(M.state.scan.queue[firstInfo].cmd == "talisman info blackdragon", "INFO for the first talisman held and not read")
+local asks = {}
+for _, step in ipairs(M.state.scan.queue) do asks[step.cmd] = true end
+check(asks["talisman info silverdragon"], "INFO again for one saved with no set, as 0.4.3 could cut it")
+check(not asks["talisman info reddragon"], "and not for one read whole")
 game(SET_DRAGON)
 check(SENT[8] == "talisman set azatlan", "a SET read, the next is sent")
 check(#M.data.sets.dragon.talismans == 6, "and the set's talismans are kept, for its marks")
@@ -1429,6 +1451,26 @@ check(ECHOED[#ECHOED]:find("^\n<gold>%[tals%]"), "after a line with text on it, 
 said = table.concat(ECHOED, "\n")
 check(said:find("Scan completed (17 pieces found for Dragon). <red>Not answered: talisman info blackdragon<reset>", 1, true),
       "the closing line names what went unanswered, got " .. said)
+
+-- An INFO the scan asked for, cut short by a tell, is not its answer: nothing
+-- is saved, the tell is shown, and the step goes unanswered.
+ECHOED = {}
+M.data.talismans = {}
+M.scan("dragon")
+game(reply(SET_DRAGON))
+game(scanPieces)
+check(SENT[#SENT] == "talisman info blackdragon", "the scan asks for blackdragon")
+local cutInfo = infoFor("blackdragon"):gsub("([^\n]*%(blackdragontooth%)[^\n]*\n)", "%1Someone tells you, \"Hello.\"\n")
+shown = game(cutInfo)
+check(any(shown):find("tells you", 1, true), "the tell that cut it is shown, got " .. any(shown))
+check(M.data.talismans.blackdragon == nil, "the cut INFO is not saved")
+check(M.state.scan and SENT[#SENT] == "talisman info blackdragon", "and the scan still waits on it")
+fireTimers()
+check(SENT[#SENT] == "talisman info golddragon", "until its time is up")
+for i = 2, #dragons do game(infoFor(dragons[i])) end
+fireTimers()
+said = table.concat(ECHOED, "\n")
+check(said:find("Not answered: talisman info blackdragon", 1, true), "and it is named, got " .. said)
 
 -- Incomplete talismans come after LIST's sets table, by when the scan has
 -- moved on to PIECES; they are still LIST's, and hidden with it.

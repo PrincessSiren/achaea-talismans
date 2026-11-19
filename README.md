@@ -167,6 +167,13 @@ read on more than five minutes later. A row is only taken if it ends in a
 keyword (lower-case letters and digits) that starts in the listing's
 `Keyword` column or up to four columns after it, so a tell, a channel line or
 a timing tag that arrives in the middle of a table is not read as a row.
+`TALISMAN INFO` is kept only once its last line, `Set:`, has been read: one
+cut short by a line like that is not saved. In a scan, the lines of it
+already hidden stay hidden, the line that cut it and the rest are shown, and
+the step goes unanswered: the scan waits its eight seconds, moves on, and
+names it at the end. Type it again, or scan again, to read it. A talisman
+saved incomplete by 0.4.3 or before is asked for again by the next full `tals
+scan` if you hold any of its pieces, and by `tals scan <set>` for its set.
 
 Removing the package stops its trigger and closes its window.
 
