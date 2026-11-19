@@ -127,10 +127,14 @@ That repository's `check-mpackage-contents` flags a `sysDataSendRequest`
 handler as a questionable event to validate by hand, and this package has one:
 `M.start` registers it, to hand each command you send to `M.onSend`, which
 notices the talisman commands you type. The first publish was checked whole
-and failed it; a later one is compared with the version before it, and fails
-only when its diff, with 20 lines of context, reaches the line in `M.start`
-that registers the handler. `M.onSend` itself is far enough away not to count.
-A publish that fails it waits for a maintainer to merge it.
+and failed it. A later one is compared with the version before it, and fails
+when its diff, with 20 lines of context, reaches the line in `M.start` that
+registers the handler. **Every release does:** `build.py` writes the build
+stamp, `AchaeaTalismans.BUILD = "…"`, at the end of the script, 11 lines below
+that registration in the built `.xml`, and the stamp changes whenever the
+source does. So every publish waits for a maintainer to merge it. Moving the
+registration more than 20 lines from the end of the script would let one with
+no other flagged change merge itself.
 
 Each publish opens a pull request there. What follows is that repository's
 behaviour as AchaeaHidden's releases met it, not something this one controls:
