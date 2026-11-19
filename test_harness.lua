@@ -1452,6 +1452,26 @@ said = table.concat(ECHOED, "\n")
 check(said:find("Scan completed (17 pieces found for Dragon). <red>Not answered: talisman info blackdragon<reset>", 1, true),
       "the closing line names what went unanswered, got " .. said)
 
+-- An INFO the scan asked for, cut short by a tell, is not its answer: nothing
+-- is saved, the tell is shown, and the step goes unanswered.
+ECHOED = {}
+M.data.talismans = {}
+M.scan("dragon")
+game(reply(SET_DRAGON))
+game(scanPieces)
+check(SENT[#SENT] == "talisman info blackdragon", "the scan asks for blackdragon")
+local cutInfo = infoFor("blackdragon"):gsub("([^\n]*%(blackdragontooth%)[^\n]*\n)", "%1Someone tells you, \"Hello.\"\n")
+shown = game(cutInfo)
+check(any(shown):find("tells you", 1, true), "the tell that cut it is shown, got " .. any(shown))
+check(M.data.talismans.blackdragon == nil, "the cut INFO is not saved")
+check(M.state.scan and SENT[#SENT] == "talisman info blackdragon", "and the scan still waits on it")
+fireTimers()
+check(SENT[#SENT] == "talisman info golddragon", "until its time is up")
+for i = 2, #dragons do game(infoFor(dragons[i])) end
+fireTimers()
+said = table.concat(ECHOED, "\n")
+check(said:find("Not answered: talisman info blackdragon", 1, true), "and it is named, got " .. said)
+
 -- Incomplete talismans come after LIST's sets table, by when the scan has
 -- moved on to PIECES; they are still LIST's, and hidden with it.
 M.data.talismans = {}
